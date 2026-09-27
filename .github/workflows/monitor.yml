@@ -1,0 +1,190 @@
+name: Monitor
+
+# 开源古籍网站（kaiyuanguji.com）的公开监控。放公开仓，是因为公开仓的 Actions 分钟数免费。
+# 只打公开站点，**不用任何 secret**；日志和告警 issue 里只有公开站点的探测结果。
+# 要 token 的数据监测（前端错误数、反馈量、数据新鲜度）与「部署停更」在私有仓
+# open-guji/kaiyuanguji-web 的 monitor.yml 里每小时跑，调用的就是本仓代码。
+#
+#   A 主动探测   每 15 分钟   首页、搜索 L1/L2、数据桶、条目页、边缘函数、测试站、证书；
+#                            顺带新旧架构对比 HTTP 采样（www vs ssr-test，新站只记录不告警）
+#   C 契约冒烟   每 6 小时    e2e/contract 打正式站；顺带两站浏览器指标、出 24h 对比报告
+#
+# 告警 = 本仓 issue（标签 monitor），连续 2 次失败才开、恢复自动关、持续失败 6 小时提醒一次。
+# 检查失败不让 job 变红；job 红只意味着告警链路自己坏了。状态与对比样本存 Actions cache。
+# 每项测什么、阈值、误报怎么调：monitor/README.md。
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'   # A ＋ 对比 HTTP 采样
+    - cron: '41 */6 * * *'   # C ＋ 对比浏览器指标 ＋ 24h 对比报告
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'probe = A；smoke = C；compare = 只出新旧对比报告'
+        type: choice
+        options: [probe, smoke, compare]
+        default: probe
+      dry_run:
+        description: '只出报告，不开／评／关 issue'
+        type: boolean
+        default: false
+      hours:
+        description: 'compare 报告汇总最近多少小时'
+        type: string
+        default: '48'
+  push:
+    branches: [main]
+    paths: ['monitor/**', 'e2e/**', '.github/workflows/monitor.yml']
+  pull_request:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  test:
+    name: 单测（状态机、故障注入、对比）
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - working-directory: monitor
+        run: npm test
+
+  probe:
+    name: A 主动探测（+新旧对比采样）
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.suite == 'probe')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: monitor-probe
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore monitor state
+        uses: actions/cache/restore@v4
+        with:
+          path: .monitor
+          key: monitor-state-probe-${{ github.run_id }}
+          restore-keys: monitor-state-probe-
+      - name: Run checks
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ARGS="--suite probe --state .monitor/state.json --out .monitor/last.json --perf .monitor/perf/samples.jsonl"
+          [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          node monitor/run.mjs $ARGS
+      - name: Save monitor state
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v4
+        with:
+          path: .monitor
+          key: monitor-state-probe-${{ github.run_id }}
+
+  smoke:
+    name: C 契约冒烟（+新旧浏览器指标、24h 对比报告）
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '41 */6 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: monitor-smoke
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install (e2e)
+        working-directory: e2e
+        run: npm ci
+      - name: Contract tests vs production
+        working-directory: e2e
+        continue-on-error: true
+        env:
+          CI: '1'
+        run: npx playwright test --project=contract
+      - name: Restore smoke state
+        uses: actions/cache/restore@v4
+        with:
+          path: .monitor-smoke
+          key: monitor-state-smoke-${{ github.run_id }}
+          restore-keys: monitor-state-smoke-
+      - name: Fold report into alert
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ARGS="--suite smoke --smoke-report e2e/out/results.json --state .monitor-smoke/state.json"
+          [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          node monitor/run.mjs $ARGS
+      - name: Install Chromium
+        continue-on-error: true
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: Browser vitals（旧 www vs 新 ssr-test）
+        continue-on-error: true
+        run: node monitor/browser-vitals.mjs --out .monitor-smoke/perf/vitals.jsonl
+      - name: Save smoke state
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v4
+        with:
+          path: .monitor-smoke
+          key: monitor-state-smoke-${{ github.run_id }}
+      - name: Restore probe samples (read-only)
+        uses: actions/cache/restore@v4
+        with:
+          path: .monitor
+          key: monitor-state-probe-none
+          restore-keys: monitor-state-probe-
+      - name: Compare report (24h)
+        if: ${{ !cancelled() }}
+        run: node monitor/compare-report.mjs --hours 24 --samples .monitor/perf/samples.jsonl --vitals .monitor-smoke/perf/vitals.jsonl --out compare-report.md
+      - name: Upload reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-smoke-${{ github.run_id }}
+          path: |
+            e2e/out/
+            compare-report.md
+            .monitor/perf/samples.jsonl
+            .monitor-smoke/perf/vitals.jsonl
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
+
+  compare:
+    name: 新旧架构对比报告（手动）
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'compare'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: .monitor
+          key: monitor-state-probe-none
+          restore-keys: monitor-state-probe-
+      - uses: actions/cache/restore@v4
+        with:
+          path: .monitor-smoke
+          key: monitor-state-smoke-none
+          restore-keys: monitor-state-smoke-
+      - name: Compare report
+        run: node monitor/compare-report.mjs --hours "${{ inputs.hours }}" --samples .monitor/perf/samples.jsonl --vitals .monitor-smoke/perf/vitals.jsonl --out compare-report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compare-report-${{ github.run_id }}
+          path: |
+            compare-report.md
+            .monitor/perf/samples.jsonl
+            .monitor-smoke/perf/vitals.jsonl
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: ignore

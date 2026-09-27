@@ -1,0 +1,6 @@
+node_modules/
+.monitor/
+.monitor-smoke/
+e2e/out/
+compare-report.md
+monitor-dry-run.json
