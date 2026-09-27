@@ -54,8 +54,10 @@ jobs:
 
   probe:
     name: A 主动探测（+新旧对比采样）
+    # 定时只在本仓公开时跑：私有仓的 Actions 按分钟计费，每 15 分钟一轮约 3,000 分钟/月。
+    # 仓库改成公开后自动生效；手动触发不受此限（用来验通）
     if: >-
-      (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *' && !github.event.repository.private) ||
       (github.event_name == 'workflow_dispatch' && inputs.suite == 'probe')
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -87,7 +89,7 @@ jobs:
   smoke:
     name: C 契约冒烟（+新旧浏览器指标、24h 对比报告）
     if: >-
-      (github.event_name == 'schedule' && github.event.schedule == '41 */6 * * *') ||
+      (github.event_name == 'schedule' && github.event.schedule == '41 */6 * * *' && !github.event.repository.private) ||
       (github.event_name == 'workflow_dispatch' && inputs.suite == 'smoke')
     runs-on: ubuntu-latest
     timeout-minutes: 20
