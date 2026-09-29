@@ -4,7 +4,9 @@ name: Monitor
 run-name: ${{ github.event_name == 'workflow_dispatch' && format('Monitor · {0}', inputs.suite) || 'Monitor' }}
 
 # 开源古籍网站（kaiyuanguji.com）的公开监控。放公开仓，是因为公开仓的 Actions 分钟数免费。
-# 只打公开站点，**不用任何 secret**；日志和告警 issue 里只有公开站点的探测结果。
+# 只打公开站点，只用一个可选 secret：HEALTH_NOTIFY_WEBHOOK（缺了就不推；可选变量 HEALTH_NOTIFY_FORMAT）——
+# 开单／内容变化／恢复时往 IM webhook 推一条（monitor/lib/notify.mjs）。它只挂在 loop、probe、smoke 三个 job 里跑 run.mjs 的那一步，
+# 不写进 run: 命令行；日志和告警 issue 里只有公开站点的探测结果，webhook 地址与 token 一律脱敏。
 # 要 token 的数据监测（前端错误数、反馈量、数据新鲜度）与「部署停更」在私有仓
 # open-guji/kaiyuanguji-web 的 monitor.yml 里每小时跑，调用的就是本仓代码。
 #
@@ -40,6 +42,10 @@ on:
         description: 'loop 一段多少分钟（默认 335；验通时填小的，如 11）'
         type: string
         default: '335'
+      notify_test:
+        description: '只在 suite=probe 时有效：不探测，只往 IM webhook 发一条固定文本「【监控测试】推送链路正常」，验推送链路'
+        type: boolean
+        default: false
       chain:
         description: 'loop 段末是否发起下一段（验通时取消勾选，免得链子一直续下去）'
         type: boolean
@@ -86,9 +92,18 @@ jobs:
           path: .monitor
           key: monitor-state-probe-${{ github.run_id }}
           restore-keys: monitor-state-probe-
+      - name: 推送链路测试（notify_test：只发一条固定文本，不探测）
+        if: ${{ inputs.notify_test }}
+        env:
+          HEALTH_NOTIFY_WEBHOOK: ${{ secrets.HEALTH_NOTIFY_WEBHOOK }}
+          HEALTH_NOTIFY_FORMAT: ${{ vars.HEALTH_NOTIFY_FORMAT }}
+        run: node monitor/run.mjs --notify-test
       - name: Run checks
+        if: ${{ !inputs.notify_test }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          HEALTH_NOTIFY_WEBHOOK: ${{ secrets.HEALTH_NOTIFY_WEBHOOK }}
+          HEALTH_NOTIFY_FORMAT: ${{ vars.HEALTH_NOTIFY_FORMAT }}
         run: |
           ARGS="--suite probe --state .monitor/state.json --out .monitor/last.json --perf .monitor/perf/samples.jsonl"
           [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
@@ -142,6 +157,8 @@ jobs:
       - name: 循环探测（每 5 分钟一轮，默认共 335 分钟）
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          HEALTH_NOTIFY_WEBHOOK: ${{ secrets.HEALTH_NOTIFY_WEBHOOK }}
+          HEALTH_NOTIFY_FORMAT: ${{ vars.HEALTH_NOTIFY_FORMAT }}
         run: |
           ARGS="--suite probe --state .monitor/state.json --out .monitor/last.json --perf .monitor/perf/samples.jsonl"
           [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
@@ -194,6 +211,8 @@ jobs:
       - name: Fold report into alert
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          HEALTH_NOTIFY_WEBHOOK: ${{ secrets.HEALTH_NOTIFY_WEBHOOK }}
+          HEALTH_NOTIFY_FORMAT: ${{ vars.HEALTH_NOTIFY_FORMAT }}
         run: |
           ARGS="--suite smoke --smoke-report e2e/out/results.json --state .monitor-smoke/state.json"
           [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"

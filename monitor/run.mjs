@@ -17,6 +17,8 @@
  * --suite smoke   C 类：读 Playwright JSON 报告，折成一个检查项
  * --dry-run       不碰 GitHub，只打印会开／评论／关哪张单
  * --perf FILE     顺带做新旧架构对比采样（任务书 §六），样本追加进 FILE（JSONL，保留 72 小时）
+ * --notify-test   不探测，只往 IM webhook 发一条固定测试文本，验证推送链路（overview#287）
+ * 推送：开单／内容变化／恢复时推一次 IM webhook（env HEALTH_NOTIFY_WEBHOOK，可选；缺了就不推），见 lib/notify.mjs
  *
  * 退出码：检查失败**不**让进程非零——否则 Actions 每 15 分钟再发一封「workflow failed」邮件，
  * 与 issue 通知重复。只有告警链路自身坏了（GitHub API 写失败）才非零，那是真要人看的。
@@ -35,11 +37,12 @@ import { readRequiredUi, readPkgChangedAt, readAnchors } from './lib/context.mjs
 import { samplePerf, shadowChecks } from './checks/perf.mjs';
 import { loadTargets } from './perf-config.mjs';
 import { appendJsonl } from './lib/samples.mjs';
+import { pushNotify } from './lib/notify.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 export function parseArgs(argv) {
-  const a = { suite: 'probe', repoRoot: null, perf: null, withData: false, dataEvery: null, dryRun: false, state: null, smokeReport: null, only: null, out: null };
+  const a = { suite: 'probe', repoRoot: null, perf: null, withData: false, dataEvery: null, dryRun: false, state: null, smokeReport: null, only: null, out: null, notifyTest: false };
   for (let i = 0; i < argv.length; i += 1) {
     const k = argv[i];
     if (k === '--suite') a.suite = argv[++i];
@@ -52,6 +55,7 @@ export function parseArgs(argv) {
     else if (k === '--out') a.out = argv[++i];
     else if (k === '--perf') a.perf = argv[++i];
     else if (k === '--repo-root') a.repoRoot = argv[++i];
+    else if (k === '--notify-test') a.notifyTest = true;
   }
   return a;
 }
@@ -117,6 +121,19 @@ export async function processAlerts({ results, state, now, gh, runUrl, titlePref
   return { state: { ...state, checks: nextChecks }, log, notify };
 }
 
+export const NOTIFY_TITLE = '开源古籍线上监控（公开：探测／契约冒烟）';
+export const NOTIFY_TEST_TEXT = '【监控测试】推送链路正常';
+
+/**
+ * 有告警动作（开单／内容变化／恢复）才推一条；没有就不碰网络。推送失败只返回结果，不抛。
+ * @returns {Promise<{status,detail}|null>}
+ */
+export async function pushAlerts({ notify, runUrl, now = Date.now(), env = process.env, fetchImpl }) {
+  if (!notify.length) return null;
+  const text = [NOTIFY_TITLE, `时间：${new Date(now).toISOString().slice(0, 16).replace('T', ' ')} UTC`, `Run: ${runUrl}`, '', ...notify].join('\n');
+  return pushNotify({ title: NOTIFY_TITLE, text, env, fetchImpl });
+}
+
 export function renderReport(results, { suite, ms, log }) {
   const head = results.map((r) => `${icon(r.status)} ${r.id} ${r.name}`).join('  \n');
   return [
@@ -170,6 +187,13 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cfg = loadConfig();
   const repoRoot = resolve(args.repoRoot || process.env.MON_REPO_ROOT || resolve(HERE, '..'));
+  if (args.notifyTest) {
+    // 只发固定文本，不带任何探测内容；没配或发失败都非零，让人一眼看出链路没通
+    const r = await pushNotify({ title: NOTIFY_TEST_TEXT, text: NOTIFY_TEST_TEXT });
+    console.log(`推送测试：${r.status === 'sent' ? '✅' : '❌'} ${r.detail}`);
+    process.exitCode = r.status === 'sent' ? 0 : 1;
+    return;
+  }
   const state = loadState(args.state);
   const now = Date.now();
   const ctx = buildContext({ cfg, now, repoRoot, state });
@@ -223,8 +247,19 @@ async function main() {
     exit = 1;
   }
 
+  // 推送不影响退出码：失败只在报告里留一行（已脱敏）
+  let pushNote = '';
+  if (!args.dryRun) {
+    const pr = await pushAlerts({ notify: out.notify, runUrl, now });
+    if (pr) {
+      pushNote = `推送：${pr.status === 'sent' ? '✅' : pr.status === 'skipped' ? '⏭' : '⚠️'} ${pr.detail}`;
+      if (pr.status === 'failed') console.error(`::warning::${pr.detail}`);
+    }
+  }
+
   let report = renderReport(results, { suite: args.suite + (args.withData ? '+data' : ''), ms: Date.now() - t0, log: out.log });
   if (perfNote) report += `\n\n${perfNote}\n`;
+  if (pushNote) report += `\n${pushNote}\n`;
   console.log(report);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, report + '\n');
   if (args.state) {
