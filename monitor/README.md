@@ -31,10 +31,22 @@
 - **连续 2 次失败才开单**；已开的单，失败内容（哪些子项挂了）变了立刻评论一次，否则每 6 小时提醒一次；
   **恢复即自动关单**，评论恢复时间与持续时长。
 - `warn`（例：正式站还没 promote 新版本、OAuth 未配置）不开单；`skip`（缺 secret）既不开单也不关单。
-- 邮件：GitHub 的 issue 通知（仓主默认收到；见文末「要用户配的」）。另外开单／变化／恢复时推一次 IM webhook（未配就跳过）。
+- 邮件：GitHub 的 issue 通知（仓主默认收到；见文末「要用户配的」）。另外开单／变化／恢复时推一次 IM webhook（未配就跳过，见「告警推送」）。
 - 检查失败不会让 workflow 变红（免得每 15 分钟多一封「run failed」邮件）；**workflow 红 = 告警链路自己坏了**，要看。
 - 状态（连续失败数、issue 号、搜索命中基线）存 Actions cache；丢了会从 open 的 monitor 单找回，最坏晚一轮开单。
 - 人手关掉一张还在失败的单：下一次失败会重新开（状态机当它是新故障）。想让某项闭嘴，调阈值或在 `checks/` 里把它去掉，别靠关单。
+
+## 告警推送
+
+开单／失败内容变化／恢复这三种动作，除了 issue，还会往 IM webhook 推一条（持续失败与 6 小时提醒不推）。推送做在 `run.mjs` 里（`lib/notify.mjs`，node 直接 POST）——loop 段里每 5 分钟起一个 `run.mjs` 子进程，没有 workflow step 可挂。
+
+- **只用一个可选 secret `HEALTH_NOTIFY_WEBHOOK`**；没配就静默跳过，不影响 issue 告警。可选变量 `HEALTH_NOTIFY_FORMAT`：`generic`（默认，`{"text":…}`）｜`feishu`｜`dingtalk`｜`slack`｜`pushplus`，取值与私有仓 `ops/health-notify.sh` 一致。pushplus 时 secret 填 token 本身或含 `token=` 的 URL（发往固定端点）。
+- secret 只在 loop、probe、smoke 三个 job 里跑 `run.mjs` 的那一步以环境变量挂上，不写进 `run:` 命令行。
+- **本仓公开：日志、报告、issue 里不许出现 webhook 地址或 token。** 推送失败只写异常类型和错误码，响应体不进日志，写出去前统一过 `redact()`。
+- 推送失败不抛、不改退出码，报告里留一行「推送：⚠️ …」（已脱敏）和一条 `::warning::`。
+- 私有仓 `--suite private` 那一步不挂这个 secret，仍由它自己的 workflow step 用 `ops/health-notify.sh` 推，不会重复。
+- **验通**：Actions → Monitor → Run workflow，`suite = probe`，勾 `notify_test`。它不探测、不碰 issue，只发一条固定文本「【监控测试】推送链路正常」；没配 secret 或发送失败，这一步会变红。**不要用 loop 验**。
+- 改了推送代码（或 secret）之后，运行中的 loop 段还是旧代码，要等下一段才生效（见上「探测自续」）。
 
 ## 检查项
 

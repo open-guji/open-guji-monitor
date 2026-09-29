@@ -12,7 +12,8 @@ import { PROBE_CHECKS, PRIVATE_PROBE_CHECKS } from '../checks/probe.mjs';
 import { DATA_CHECKS } from '../checks/data.mjs';
 import { emptyState } from '../lib/state.mjs';
 import { makeGithub } from '../lib/alert.mjs';
-import { buildContext, runChecks, processAlerts } from '../run.mjs';
+import http from 'node:http';
+import { buildContext, runChecks, processAlerts, pushAlerts } from '../run.mjs';
 import { startFake, FAKE_UI } from './fake.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -153,4 +154,61 @@ test('B3 数据新鲜度：最早未上线提交 > 36h 报，≤ 36h 不报', as
   fake.faults.compare = { ahead_by: 1, commits: [at(20)] };
   r = await round(emptyState(), now, DATA_CHECKS);
   assert.equal(r.results.find((x) => x.id === 'B3-freshness').status, 'ok');
+});
+
+// ── IM 推送（overview#287）：开单推一次、内容变化推一次、持续失败不重复推、恢复推一次 ──
+test('推送：开单推一次、内容变化推一次、持续失败与 6 小时提醒不重复推、恢复推一次；推送失败不影响开单', async () => {
+  const pushed = [];
+  let hookStatus = 200;
+  const hook = http.createServer((req, res) => {
+    let b = '';
+    req.on('data', (c) => { b += c; });
+    req.on('end', () => { pushed.push(JSON.parse(b).text); res.writeHead(hookStatus); res.end('{}'); });
+  });
+  await new Promise((r) => hook.listen(0, '127.0.0.1', r));
+  const env = { HEALTH_NOTIFY_WEBHOOK: `http://127.0.0.1:${hook.address().port}/hook/AbCdEf123456SECRETKEY` };
+  const step = async (state, now) => {
+    const r = await round(state, now);
+    const pr = await pushAlerts({ notify: r.notify, runUrl: 'run-url', now, env });
+    return { ...r, pr };
+  };
+  try {
+    const t0 = Date.now();
+    fake.faults.authMeStatus = 200; // A5 的一个子项失败
+    let r = await step(emptyState(), t0);
+    assert.equal(r.pr, null, '第 1 轮失败还没开单，不推');
+    assert.equal(pushed.length, 0);
+
+    r = await step(r.state, t0 + 5 * 60000);
+    assert.equal(r.pr.status, 'sent', '第 2 轮开单，推一次');
+    assert.equal(pushed.length, 1);
+    assert.match(pushed[0], /🔴 A5-edge/);
+    assert.match(pushed[0], /run-url/);
+
+    r = await step(r.state, t0 + 10 * 60000);
+    assert.equal(pushed.length, 1, '持续同样失败：不重复推');
+
+    r = await step(r.state, t0 + 7 * 3600000);
+    assert.equal(pushed.length, 1, '6 小时提醒只在 issue 里评论，不推');
+
+    // 同一项换了失败的子项（签名变了）才算「内容变化」；数值抖动不算
+    fake.faults.feedbackItems = [{ id: 'fb_2_b', content: '电话 13912345678', createdAt: new Date().toISOString() }];
+    hookStatus = 500; // 推送坏了：失败不抛，issue 评论照常
+    r = await step(r.state, t0 + 7 * 3600000 + 5 * 60000);
+    assert.equal(pushed.length, 2, '失败内容有变化：推一次');
+    assert.match(pushed[1], /有变化/);
+    assert.equal(r.pr.status, 'failed');
+    assert.ok(!r.pr.detail.includes('AbCdEf123456SECRETKEY'));
+
+    hookStatus = 200;
+    fake.reset();
+    r = await step(r.state, t0 + 8 * 3600000);
+    assert.equal(pushed.length, 3, '恢复：推一次');
+    assert.match(pushed[2], /✅ A5-edge.*已恢复/);
+
+    r = await step(r.state, t0 + 8 * 3600000 + 5 * 60000);
+    assert.equal(pushed.length, 3, '恢复后全绿：不推');
+  } finally {
+    hook.close();
+  }
 });
