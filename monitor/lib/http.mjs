@@ -34,6 +34,16 @@ export function bust(url) {
   return `${url}${url.includes('?') ? '&' : '?'}_=${Date.now()}`;
 }
 
+/**
+ * 条目页 /item/<id> 用的绕缓存参数。不能用 bust()：网站（overview#280 S1）对条目页带「白名单之外的参数」的
+ * 整页请求一律 308 到干净地址，`?_=` 会被跳走、A4 就红了（2026-09-29 实测）。
+ * 白名单里的 `page` 是详情组件自己的分页参数，不影响 SSR 内容，每次取不同的值即可绕开 CDN 缓存、打到源站。
+ * 网站那边若改了白名单，A4 会报 308，看 nextjs/src/lib/item-query.ts。
+ */
+export function bustItem(url) {
+  return `${url}${url.includes('?') ? '&' : '?'}page=${Date.now()}`;
+}
+
 /** 响应的一句话描述，写进报告 */
 export function describe(r) {
   return r.status === 0 ? `连不上（${r.error}）` : `HTTP ${r.status}，${r.ms}ms`;

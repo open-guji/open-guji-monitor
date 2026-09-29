@@ -6,7 +6,7 @@
  * 不是探「服务还活着吗」——/health 绿、裸查询 200，前端带 filter 的查询照样可能 400。
  */
 import tls from 'node:tls';
-import { request, parseJson, bust, describe } from '../lib/http.mjs';
+import { request, parseJson, bust, bustItem, describe } from '../lib/http.mjs';
 import { part, aggregate } from '../lib/result.mjs';
 import { cmpVersion, uiVersionFromHtml } from '../lib/version.mjs';
 
@@ -175,7 +175,8 @@ export async function itemPages(ctx) {
   const { cfg, anchors } = ctx;
   const id = anchors.entries.work;
   const a = await request(bust(`${cfg.www}/book-index?id=${id}`), { timeoutMs: cfg.timeoutMs });
-  const b = await request(bust(`${cfg.staging}/item/${id}`), { timeoutMs: cfg.timeoutMs });
+  // 条目页不能挂 `?_=`（会被 308 成干净地址），用白名单里的 page 绕缓存，见 bustItem
+  const b = await request(bustItem(`${cfg.staging}/item/${id}`), { timeoutMs: cfg.timeoutMs });
   const has = b.status === 200 && b.text.includes(anchors.workTitle);
   return aggregate('A4-item-pages', '条目页', [
     part(`正式站 /book-index?id=${id}`, a.status === 200 ? 'ok' : 'fail', describe(a), 'HTTP 200'),
