@@ -93,5 +93,5 @@ test('reconcile：单被人手动关了 → 忘掉，之后再失败会重新开
 test('基线取中位数，样本不足不判', () => {
   assert.equal(medianOf([100, 101]), null);
   assert.equal(medianOf([100, 300, 101]), 101);
-  assert.equal(pushBaseline(Array(50).fill(1), 2).values.length, 48);
+  assert.equal(pushBaseline(Array(200).fill(1), 2).values.length, 144);
 });

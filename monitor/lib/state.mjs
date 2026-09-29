@@ -97,7 +97,7 @@ export function reconcile(checkState, openIssues, { openAfter = OPEN_AFTER } = {
  * 基线：记最近 N 个观测值，取中位数。用于「命中数不低于基线 90%」这类相对阈值。
  * 返回 { baseline, values }；baseline 在样本不足 minSamples 时为 null（不判）。
  */
-export function pushBaseline(values = [], v, { keep = 48, minSamples = 3 } = {}) {
+export function pushBaseline(values = [], v, { keep = 144, minSamples = 3 } = {}) {
   const arr = [...values, v].filter((x) => Number.isFinite(x)).slice(-keep);
   return { values: arr, baseline: medianOf(values, minSamples) };
 }
