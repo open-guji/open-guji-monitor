@@ -6,11 +6,23 @@
 
 | 类 | 在哪跑 | 频率 | 内容 |
 |---|---|---|---|
-| **A** 主动探测（A1 首页、A2～A7） | 公开仓 `monitor.yml` | 每 15 分钟 | 纯 HTTP，只打公开站点，单次 < 2 分钟 |
-| **C** 契约冒烟 ＋ 新旧对比 | 公开仓 | 每 6 小时（对比 HTTP 采样随 A 每 15 分钟） | `e2e` 的 contract 项目打正式站，结果折成一项 |
+| **A** 主动探测（A1 首页、A2～A7） | 公开仓 `monitor.yml` | 每 5 分钟（自续循环） | 纯 HTTP，只打公开站点，单次 < 2 分钟 |
+| **C** 契约冒烟 ＋ 新旧对比 | 公开仓 | 每 6 小时（对比 HTTP 采样随 A 每 5 分钟） | `e2e` 的 contract 项目打正式站，结果折成一项 |
 | **A1-deploy-lag** 部署停更 ＋ **B** 数据监测 | 私有仓 kaiyuanguji-web `monitor.yml`（checkout 本仓代码，`--suite private --repo-root .`） | 每小时 | 要读私有仓 `nextjs/package.json`，要 `ERROR_VIEW_TOKEN`／`FEEDBACK_ADMIN_TOKEN`；告警开在私有仓 |
 
 公开仓的日志与 issue 只含公开站点的探测结果；错误汇总、反馈计数只出现在私有仓。
+
+## 探测自续（loop）
+
+（overview#280 M1）GitHub 对 cron 降频，靠 cron 的 A 探测实际间隔是几小时。现在：
+
+- `monitor.yml` 的 **`loop` job**：一段最长 335 分钟（单 job 上限 360），里面 `monitor/loop.mjs` 按「段开始 + k×5 分钟」对齐，每轮起一个 `run.mjs --suite probe` 子进程（单轮超 4 分钟强杀）。某一轮崩了／拖长了不影响下一轮；拖过若干个间隔就跳过、不补跑。
+- 段末 `gh workflow run monitor.yml -f suite=loop` 发起下一段（用 `GITHUB_TOKEN`，需要 `actions: write`；`workflow_dispatch` 不受「GITHUB_TOKEN 不触发新 run」限制）。`concurrency: monitor-loop`、不取消进行中的：下一段排队，前一段结束就接上，中间空档约 1 分钟（装环境）。状态先排下一段再存 cache。
+- **`ensure-loop`（cron 每 15 分钟）**：`gh run list` 看有没有标题含 `loop` 且未结束的 run（`run-name` 给 loop 段起的名是 `Monitor · loop`）；没有就起一段。cron 被降频也没关系，它只是兜底。
+- 手动起一段：Actions → Monitor → Run workflow，`suite=loop`。手动只跑一轮验通：`suite=probe`（可勾 dry run）。
+- 想停：取消正在跑的 `Monitor · loop` run，并暂时禁用 workflow（否则 ensure-loop 会把它再拉起来）。
+- **节奏变了带来的影响**：连续 2 次失败才开单，现在最快约 10 分钟开单（原来 30 分钟）；搜索命中数基线取「最近 144 次」（5 分钟一轮 ≈ 12 小时，原来 48 次 ≈ 12 小时）；对比采样每 5 分钟一次，仍保留 72 小时。
+- 状态存 Actions cache（`monitor-state-probe-<run_id>`）；一段被取消／超时丢了没存的状态，会从 open 的 monitor 单找回，最坏晚一轮开单。
 
 ## 告警怎么发
 

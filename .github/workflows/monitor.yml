@@ -1,13 +1,21 @@
 name: Monitor
 
+# loop 段的标题带 loop，ensure-loop 靠它认「已经有一段在跑」
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Monitor · {0}', inputs.suite) || 'Monitor' }}
+
 # 开源古籍网站（kaiyuanguji.com）的公开监控。放公开仓，是因为公开仓的 Actions 分钟数免费。
 # 只打公开站点，**不用任何 secret**；日志和告警 issue 里只有公开站点的探测结果。
 # 要 token 的数据监测（前端错误数、反馈量、数据新鲜度）与「部署停更」在私有仓
 # open-guji/kaiyuanguji-web 的 monitor.yml 里每小时跑，调用的就是本仓代码。
 #
-#   A 主动探测   每 15 分钟   首页、搜索 L1/L2、数据桶、条目页、边缘函数、测试站、证书；
+#   A 主动探测   每 5 分钟     首页、搜索 L1/L2、数据桶、条目页、边缘函数、测试站、证书；
 #                            顺带新旧架构对比 HTTP 采样（www vs ssr-test，新站只记录不告警）
 #   C 契约冒烟   每 6 小时    e2e/contract 打正式站；顺带两站浏览器指标、出 24h 对比报告
+#
+# A 的触发方式是「自续」（overview#280 M1）：GitHub 对 cron 降频（公开仓 31 小时只触发 10 次，设计约 125 次），
+# 所以 A 不靠 cron 跑，而是一个长时间运行的 job（loop，一「段」约 5.5 小时）里自己每 5 分钟调一次 run.mjs，
+# 到点用 workflow_dispatch 发起下一段（concurrency 让下一段在这一段结束后立刻接上）；
+# cron（每 15 分钟）只跑 ensure-loop：发现没有在跑／排队的 loop 段就起一段，作兜底重启。
 #
 # 告警 = 本仓 issue（标签 monitor），连续 2 次失败才开、恢复自动关、持续失败 6 小时提醒一次。
 # 检查失败不让 job 变红；job 红只意味着告警链路自己坏了。状态与对比样本存 Actions cache。
@@ -15,14 +23,14 @@ name: Monitor
 
 on:
   schedule:
-    - cron: '*/15 * * * *'   # A ＋ 对比 HTTP 采样
+    - cron: '*/15 * * * *'   # 兜底：没有 loop 段在跑就起一段（A 本身由 loop 每 5 分钟跑）
     - cron: '41 */6 * * *'   # C ＋ 对比浏览器指标 ＋ 24h 对比报告
   workflow_dispatch:
     inputs:
       suite:
-        description: 'probe = A；smoke = C；compare = 只出新旧对比报告'
+        description: 'loop = A 自续循环（一段约 5.5 小时，结束时自己发起下一段）；probe = A 只跑一轮；smoke = C；compare = 只出新旧对比报告'
         type: choice
-        options: [probe, smoke, compare]
+        options: [loop, probe, smoke, compare]
         default: probe
       dry_run:
         description: '只出报告，不开／评／关 issue'
@@ -40,6 +48,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: write   # ensure-loop／loop 用 GITHUB_TOKEN 发起下一段（workflow_dispatch 不受「GITHUB_TOKEN 不触发新 run」的限制）
 
 jobs:
   test:
@@ -53,12 +62,9 @@ jobs:
         run: npm test
 
   probe:
-    name: A 主动探测（+新旧对比采样）
-    # 定时只在本仓公开时跑：私有仓的 Actions 按分钟计费，每 15 分钟一轮约 3,000 分钟/月。
-    # 仓库改成公开后自动生效；手动触发不受此限（用来验通）
-    if: >-
-      (github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *' && !github.event.repository.private) ||
-      (github.event_name == 'workflow_dispatch' && inputs.suite == 'probe')
+    name: A 主动探测（手动跑一轮；定时由 loop 负责）
+    # 定时的 A 已改由 loop 每 5 分钟跑（见文件头），这里只留手动触发：验通、临时补一轮
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'probe'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     concurrency:
@@ -79,6 +85,64 @@ jobs:
           ARGS="--suite probe --state .monitor/state.json --out .monitor/last.json --perf .monitor/perf/samples.jsonl"
           [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
           node monitor/run.mjs $ARGS
+      - name: Save monitor state
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v4
+        with:
+          path: .monitor
+          key: monitor-state-probe-${{ github.run_id }}
+
+  ensure-loop:
+    name: 兜底：没有探测段在跑就起一段
+    # 只在本仓公开时跑（私有仓的 Actions 按分钟计费；loop 一天 24 小时占一个 runner）
+    if: github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *' && !github.event.repository.private
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: 有 loop 段在跑或排队就什么都不做，否则起一段
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          active=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow monitor.yml --limit 50 \
+            --json status,displayTitle \
+            --jq '[.[] | select(.status != "completed" and (.displayTitle | contains("loop")))] | length')
+          echo "在跑或排队的 loop 段：$active"
+          if [ "$active" = "0" ]; then
+            gh workflow run monitor.yml --repo "$GITHUB_REPOSITORY" -f suite=loop
+            echo "::warning::没有在跑的探测段（自续链断了？），已起一段"
+          fi
+
+  loop:
+    name: A 主动探测（自续循环，每 5 分钟）
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'loop'
+    runs-on: ubuntu-latest
+    # 一段 335 分钟 + 装环境／收尾余量 < 355 < 单 job 上限 360 分钟
+    timeout-minutes: 355
+    # 同一时刻只有一段在跑；下一段在排队（GitHub 只保留一个 pending），前一段结束后立刻接上
+    concurrency:
+      group: monitor-loop
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore monitor state
+        uses: actions/cache/restore@v4
+        with:
+          path: .monitor
+          key: monitor-state-probe-${{ github.run_id }}
+          restore-keys: monitor-state-probe-
+      - name: 循环探测（每 5 分钟一轮，共 335 分钟）
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          ARGS="--suite probe --state .monitor/state.json --out .monitor/last.json --perf .monitor/perf/samples.jsonl"
+          [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          node monitor/loop.mjs --segment-minutes 335 --interval-minutes 5 -- $ARGS
+      # 先排下一段（它会在 concurrency 里等到本段结束），再存状态；本段被取消／超时则靠 ensure-loop 兜底
+      - name: 发起下一段
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run monitor.yml --repo "$GITHUB_REPOSITORY" -f suite=loop -f dry_run=${{ inputs.dry_run }}
       - name: Save monitor state
         if: ${{ !cancelled() }}
         uses: actions/cache/save@v4

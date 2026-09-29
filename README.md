@@ -9,11 +9,16 @@
 
 | 在哪跑 | 跑什么 | 多久一次 |
 |---|---|---|
-| 本仓 `.github/workflows/monitor.yml` | A 主动探测（首页、搜索 L1/L2、数据桶、条目页、边缘函数、测试站、证书）＋ 新旧对比 HTTP 采样 | 15 分钟 |
+| 本仓 `.github/workflows/monitor.yml` | A 主动探测（首页、搜索 L1/L2、数据桶、条目页、边缘函数、测试站、证书）＋ 新旧对比 HTTP 采样 | **5 分钟（自续循环，见下）** |
 | 本仓 | C 契约冒烟（`e2e/contract`）＋ 新旧对比浏览器指标 ＋ 24h 对比报告 | 6 小时 |
 | 私有仓 kaiyuanguji-web | A1 部署停更 ＋ B 数据监测 | 1 小时 |
 
-告警：本仓 issue，标签 `monitor`。连续 2 次失败才开，恢复后自动关。
+**A 为什么是自续循环**：GitHub 对 cron 降频（公开仓 31 小时只触发 10 次，设计约 125 次探测），靠 cron 探测间隔实际是几小时。
+现在一个长时间运行的 job（`loop`，一段约 5.5 小时）里每 5 分钟自己调一次 `run.mjs`，到点用 `workflow_dispatch` 发起下一段，
+`concurrency` 让下一段在这一段结束后立刻接上；cron（每 15 分钟）只跑 `ensure-loop`——发现没有在跑／排队的 `loop` 段就起一段，作兜底重启。
+断了怎么办、怎么手动起一段：[monitor/README.md 的「探测自续」](monitor/README.md#探测自续loop)。
+
+告警：本仓 issue，标签 `monitor`。连续 2 次失败才开（现在 5 分钟一轮，最快约 10 分钟内开单），恢复后自动关。
 想收邮件，就 Watch 本仓（Custom → Issues）。
 
 每项测什么、阈值、误报怎么调、对比报告怎么读：[monitor/README.md](monitor/README.md)。
