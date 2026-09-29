@@ -122,7 +122,8 @@ jobs:
 
   loop:
     name: A 主动探测（自续循环，每 5 分钟）
-    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'loop'
+    # 私有仓的 Actions 按分钟计费，loop 又一天 24 小时占一个 runner：仓库万一被改成私有，链子在这里断掉
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'loop' && !github.event.repository.private
     runs-on: ubuntu-latest
     # 一段 335 分钟 + 装环境／收尾余量 < 355 < 单 job 上限 360 分钟
     timeout-minutes: 355
