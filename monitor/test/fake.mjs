@@ -84,7 +84,13 @@ export async function startFake() {
     // ── staging
     if (p === '/stg/') return send(res, f.stagingStatus, html(f.stagingUi), 'text/html');
     if (p === '/stg/robots.txt') return send(res, 200, f.robots, 'text/plain');
-    if (p.startsWith('/stg/item/')) return send(res, 200, html(f.stagingUi, `<h1>${f.itemTitle}</h1>`), 'text/html');
+    if (p.startsWith('/stg/item/')) {
+      // 模拟网站 S1（overview#280）：条目页带白名单之外的参数 → 308 到干净地址
+      const ITEM_QUERY_WHITELIST = ['tab', 'juan', 'page', 'mode', 'collection', 'redirected_from', 'no_redirect'];
+      const extra = [...u.searchParams.keys()].filter((k) => !ITEM_QUERY_WHITELIST.includes(k));
+      if (extra.length) { res.writeHead(308, { location: p }); return res.end(); }
+      return send(res, 200, html(f.stagingUi, `<h1>${f.itemTitle}</h1>`), 'text/html');
+    }
     // ── GitHub API
     if (p.startsWith('/gh/repos/')) {
       gh.calls.push(`${req.method} ${p}`);
