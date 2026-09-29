@@ -21,6 +21,7 @@
 - **`ensure-loop`（cron 每 15 分钟）**：`gh run list` 看有没有标题含 `loop` 且未结束的 run（`run-name` 给 loop 段起的名是 `Monitor · loop`）；没有就起一段。cron 被降频也没关系，它只是兜底。
 - 手动起一段：Actions → Monitor → Run workflow，`suite=loop`。手动只跑一轮验通：`suite=probe`（可勾 dry run）。
 - 想停：取消正在跑的 `Monitor · loop` run，并暂时禁用 workflow（否则 ensure-loop 会把它再拉起来）。
+- **改了监控代码，要等下一段才生效**：一段用的是启动时 checkout 的代码，最长 5.5 小时才换下一段。急用（例如改了会让某项一直红的探针）就手动 dispatch 一次 `suite=loop` 起新段，再取消旧段（先起后取消，新段在 concurrency 里排队，旧段一停就接上）。取消的旧段不存状态，丢最近一段时间的基线和单据记录，会从 open 的 monitor 单找回，最坏晚一轮开单。2026-09-29 就是这样换的段（A4 的 `?_=` 被网站 308 那次）。
 - **节奏变了带来的影响**：连续 2 次失败才开单，现在最快约 10 分钟开单（原来 30 分钟）；搜索命中数基线取「最近 144 次」（5 分钟一轮 ≈ 12 小时，原来 48 次 ≈ 12 小时）；对比采样每 5 分钟一次，仍保留 72 小时。
 - 状态存 Actions cache（`monitor-state-probe-<run_id>`）；一段被取消／超时丢了没存的状态，会从 open 的 monitor 单找回，最坏晚一轮开单。
 
