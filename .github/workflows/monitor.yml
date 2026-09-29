@@ -36,6 +36,14 @@ on:
         description: '只出报告，不开／评／关 issue'
         type: boolean
         default: false
+      segment_minutes:
+        description: 'loop 一段多少分钟（默认 335；验通时填小的，如 11）'
+        type: string
+        default: '335'
+      chain:
+        description: 'loop 段末是否发起下一段（验通时取消勾选，免得链子一直续下去）'
+        type: boolean
+        default: true
       hours:
         description: 'compare 报告汇总最近多少小时'
         type: string
@@ -130,16 +138,16 @@ jobs:
           path: .monitor
           key: monitor-state-probe-${{ github.run_id }}
           restore-keys: monitor-state-probe-
-      - name: 循环探测（每 5 分钟一轮，共 335 分钟）
+      - name: 循环探测（每 5 分钟一轮，默认共 335 分钟）
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           ARGS="--suite probe --state .monitor/state.json --out .monitor/last.json --perf .monitor/perf/samples.jsonl"
           [ "${{ inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
-          node monitor/loop.mjs --segment-minutes 335 --interval-minutes 5 -- $ARGS
+          node monitor/loop.mjs --segment-minutes "${{ inputs.segment_minutes }}" --interval-minutes 5 -- $ARGS
       # 先排下一段（它会在 concurrency 里等到本段结束），再存状态；本段被取消／超时则靠 ensure-loop 兜底
       - name: 发起下一段
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.chain }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run monitor.yml --repo "$GITHUB_REPOSITORY" -f suite=loop -f dry_run=${{ inputs.dry_run }}
