@@ -1,8 +1,9 @@
 /**
- * 新旧架构对比（任务书 §六）：同一组页面同时打旧站（静态导出，www）与新站（全栈，ssr-test）。
- * 新站还没上线：它的失败只记录进样本，不开告警 issue。
+ * 正式站与测试站的对比采样（任务书 §六）。CUT2（2026-09-28）后 www 已是全栈（kyg-ssr-spike），
+ * 原先的「旧·静态 vs 新·全栈（ssr-test）」对比不再成立，改成「正式站 www vs 测试站 staging」，
+ * 两边同一套页面（/item/<id> 服务端直出），正式站告警，测试站只记录不开单。
  *
- * 可用 MON_COMPARE_TARGETS（JSON，同下面的形状）整体覆盖；MON_COMPARE_NEW 只换新站地址。
+ * 可用 MON_COMPARE_TARGETS（JSON，同下面的形状）整体覆盖；MON_COMPARE_NEW 只换测试站地址。
  */
 
 // 10 个条目：热门 4 个（锚点／perf 场景里已有，perf-ids 契约盯着不烂）＋冷门 6 个（e2e 空状态候选池，几乎没人访问，CDN 多半没缓存）
@@ -27,19 +28,12 @@ const VITAL_IDS = ['d59f20aowb9c', 'hixhd2h9bk4b', 'd59f2rxf35ds'];
 
 export function loadTargets(env = process.env) {
   if (env.MON_COMPARE_TARGETS) return JSON.parse(env.MON_COMPARE_TARGETS);
-  const oldBase = env.MON_WWW || 'https://www.kaiyuanguji.com';
-  const newBase = env.MON_COMPARE_NEW || 'https://ssr-test.kaiyuanguji.com';
+  const prodBase = env.MON_WWW || 'https://www.kaiyuanguji.com';
+  const stagingBase = env.MON_COMPARE_NEW || env.MON_STAGING || 'https://staging.kaiyuanguji.com';
+  const pages = { home: '/', 'item:ssr': '/item/{id}', fulltext: FULLTEXT };
+  const vitals = ['/', ...VITAL_IDS.map((id) => `/item/${id}`)];
   return [
-    {
-      name: 'old', label: '旧·静态（www）', base: oldBase, alert: true,
-      // 静态站没有 /item/<id>（动态路由导不出来），只比 /book-index?id=
-      pages: { home: '/', 'item:book-index': '/book-index?id={id}', fulltext: FULLTEXT },
-      vitals: ['/', ...VITAL_IDS.map((id) => `/book-index?id=${id}`)],
-    },
-    {
-      name: 'new', label: '新·全栈（ssr-test）', base: newBase, alert: false,
-      pages: { home: '/', 'item:book-index': '/book-index?id={id}', 'item:ssr': '/item/{id}', fulltext: FULLTEXT },
-      vitals: ['/', ...VITAL_IDS.map((id) => `/item/${id}`)],
-    },
+    { name: 'prod', label: '正式站（www）', base: prodBase, alert: true, pages, vitals },
+    { name: 'staging', label: '测试站（staging）', base: stagingBase, alert: false, pages, vitals },
   ];
 }

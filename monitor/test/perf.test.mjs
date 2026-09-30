@@ -19,17 +19,17 @@ let fake;
 before(async () => { fake = await startFake(); });
 after(async () => { await fake.close(); });
 
-test('默认目标：旧站 www 告警、新站 ssr-test 不告警；条目页 10 个 id', () => {
+test('默认目标：正式站 www 告警、测试站 staging 不告警；条目页 10 个 id', () => {
   const [o, n] = loadTargets({});
   assert.equal(o.base, 'https://www.kaiyuanguji.com');
-  assert.equal(n.base, 'https://ssr-test.kaiyuanguji.com');
+  assert.equal(n.base, 'https://staging.kaiyuanguji.com');
   assert.equal(o.alert, true);
   assert.equal(n.alert, false);
   assert.equal(COMPARE_IDS.length, 10);
   const pages = expandPages(n);
   assert.equal(pages.filter((p) => p.kind === 'item:ssr').length, 10);
   assert.equal(pages.filter((p) => p.kind === 'home').length, 1);
-  assert.equal(expandPages(o).some((p) => p.kind === 'item:ssr'), false, '静态站没有 /item');
+  assert.equal(expandPages(o).filter((p) => p.kind === 'item:ssr').length, 10, 'CUT2 后 www 也是全栈，同样测 /item');
 });
 
 test('CDN 命中判定', () => {
@@ -97,28 +97,28 @@ test('分位数与汇总', () => {
   assert.deepEqual(h.statuses, [502]);
 });
 
-test('报告：窗口外样本不算；有新/旧比值；三节齐全', () => {
+test('报告：窗口外样本不算；有测试/正式比值；三节齐全', () => {
   const now = Date.parse('2026-09-29T00:00:00Z');
   const at = (h) => new Date(now - h * 3600000).toISOString();
   const samples = [
-    { t: at(1), target: 'old', kind: 'item:book-index', ok: true, ttfb: 100, total: 200, hit: true },
-    { t: at(1), target: 'new', kind: 'item:book-index', ok: true, ttfb: 300, total: 400, hit: false },
-    { t: at(100), target: 'new', kind: 'item:book-index', ok: true, ttfb: 9999, total: 9999, hit: false },
-    { t: at(1), target: 'new', kind: 'check', id: 'A5-edge', ok: false, failed: ['GET /api/feedback：HTTP 500'] },
+    { t: at(1), target: 'prod', kind: 'item:book-index', ok: true, ttfb: 100, total: 200, hit: true },
+    { t: at(1), target: 'staging', kind: 'item:book-index', ok: true, ttfb: 300, total: 400, hit: false },
+    { t: at(100), target: 'staging', kind: 'item:book-index', ok: true, ttfb: 9999, total: 9999, hit: false },
+    { t: at(1), target: 'staging', kind: 'check', id: 'A5-edge', ok: false, failed: ['GET /api/feedback：HTTP 500'] },
   ];
   const vitals = [
-    { t: at(2), target: 'old', kind: '首页', page: '/', ok: true, lcp: 1800, tti: 2500, tbt: 120, fcp: 900 },
-    { t: at(2), target: 'new', kind: '首页', page: '/', ok: true, lcp: 1200, tti: 2000, tbt: 80, fcp: 700 },
-    { t: at(2), target: 'old', kind: '条目页', page: '/book-index?id={id}', ok: true, lcp: 3000, tti: 3500, tbt: 300, fcp: 900 },
-    { t: at(2), target: 'new', kind: '条目页', page: '/item/{id}', ok: true, lcp: 900, tti: 1500, tbt: 50, fcp: 600 },
+    { t: at(2), target: 'prod', kind: '首页', page: '/', ok: true, lcp: 1800, tti: 2500, tbt: 120, fcp: 900 },
+    { t: at(2), target: 'staging', kind: '首页', page: '/', ok: true, lcp: 1200, tti: 2000, tbt: 80, fcp: 700 },
+    { t: at(2), target: 'prod', kind: '条目页', page: '/item/{id}', ok: true, lcp: 3000, tti: 3500, tbt: 300, fcp: 900 },
+    { t: at(2), target: 'staging', kind: '条目页', page: '/item/{id}', ok: true, lcp: 900, tti: 1500, tbt: 50, fcp: 600 },
   ];
   const md = renderReport({ samples, vitals, hours: 48, now });
-  assert.match(md, /item:book-index：新\/旧 总耗时 p50 = 2\.00/);
+  assert.match(md, /item:book-index：测试\/正式 总耗时 p50 = 2\.00/);
   assert.doesNotMatch(md, /9999/);
-  assert.match(md, /A5-edge \| 新·全栈/);
+  assert.match(md, /A5-edge \| 测试站（staging）/);
   assert.match(md, /GET \/api\/feedback：HTTP 500/);
-  assert.match(md, /\| 首页 \| 旧·静态（www） \| 1 \| 0 \| 1800 /);
-  assert.match(md, /\| 条目页 \| 旧·静态（www） \| 1 \| 0 \| 3000 [^\n]*\n\| 条目页 \| 新·全栈（ssr-test） \| 1 \| 0 \| 900 /, '新旧条目页并排');
+  assert.match(md, /\| 首页 \| 正式站（www） \| 1 \| 0 \| 1800 /);
+  assert.match(md, /\| 条目页 \| 正式站（www） \| 1 \| 0 \| 3000 [^\n]*\n\| 条目页 \| 测试站（staging） \| 1 \| 0 \| 900 /, '正式站与测试站条目页并排');
 });
 
 test('新站挂死：连续 2 次连不上就跳过余下页面，不拖垮整轮', async () => {

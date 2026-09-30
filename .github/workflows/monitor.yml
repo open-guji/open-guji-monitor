@@ -11,7 +11,7 @@ run-name: ${{ github.event_name == 'workflow_dispatch' && format('Monitor · {0}
 # open-guji/kaiyuanguji-web 的 monitor.yml 里每小时跑，调用的就是本仓代码。
 #
 #   A 主动探测   每 5 分钟     首页、搜索 L1/L2、数据桶、条目页、边缘函数、测试站、证书；
-#                            顺带新旧架构对比 HTTP 采样（www vs ssr-test，新站只记录不告警）
+#                            顺带 www 与 staging 的 HTTP 采样对比（测试站只记录不告警）
 #   C 契约冒烟   每 6 小时    e2e/contract 打正式站；顺带两站浏览器指标、出 24h 对比报告
 #
 # A 的触发方式是「自续」（overview#280 M1）：GitHub 对 cron 降频（公开仓 31 小时只触发 10 次，设计约 125 次），
@@ -221,7 +221,7 @@ jobs:
         continue-on-error: true
         working-directory: e2e
         run: npx playwright install --with-deps chromium
-      - name: Browser vitals（旧 www vs 新 ssr-test）
+      - name: Browser vitals（正式站 www vs 测试站 staging）
         continue-on-error: true
         run: node monitor/browser-vitals.mjs --out .monitor-smoke/perf/vitals.jsonl
       - name: Save smoke state
