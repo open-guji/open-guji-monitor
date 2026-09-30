@@ -51,7 +51,7 @@ test('measure：首字节 ≤ 总耗时；连不上记 status 0', async () => {
 test('采样：两个目标＋共用搜索，新站挂了照样记样本；影子检查只进样本不碰 GitHub', async () => {
   const cfg = { ...loadConfig(), api: `${fake.base}/api`, timeoutMs: 3000 };
   const targets = [
-    { name: 'old', label: '旧', base: `${fake.base}/www`, alert: true, pages: { home: '/', 'item:book-index': '/book-index?id={id}' } },
+    { name: 'old', label: '旧', base: `${fake.base}/www`, alert: true, pages: { home: '/', 'item:ssr': '/book-index?id={id}' } },
     { name: 'new', label: '新', base: `${fake.base}/nope`, alert: false, pages: { home: '/', 'item:ssr': '/item/{id}' } },
   ];
   const now = Date.now();
@@ -101,9 +101,9 @@ test('报告：窗口外样本不算；有测试/正式比值；三节齐全', (
   const now = Date.parse('2026-09-29T00:00:00Z');
   const at = (h) => new Date(now - h * 3600000).toISOString();
   const samples = [
-    { t: at(1), target: 'prod', kind: 'item:book-index', ok: true, ttfb: 100, total: 200, hit: true },
-    { t: at(1), target: 'staging', kind: 'item:book-index', ok: true, ttfb: 300, total: 400, hit: false },
-    { t: at(100), target: 'staging', kind: 'item:book-index', ok: true, ttfb: 9999, total: 9999, hit: false },
+    { t: at(1), target: 'prod', kind: 'item:ssr', ok: true, ttfb: 100, total: 200, hit: true },
+    { t: at(1), target: 'staging', kind: 'item:ssr', ok: true, ttfb: 300, total: 400, hit: false },
+    { t: at(100), target: 'staging', kind: 'item:ssr', ok: true, ttfb: 9999, total: 9999, hit: false },
     { t: at(1), target: 'staging', kind: 'check', id: 'A5-edge', ok: false, failed: ['GET /api/feedback：HTTP 500'] },
   ];
   const vitals = [
@@ -113,7 +113,7 @@ test('报告：窗口外样本不算；有测试/正式比值；三节齐全', (
     { t: at(2), target: 'staging', kind: '条目页', page: '/item/{id}', ok: true, lcp: 900, tti: 1500, tbt: 50, fcp: 600 },
   ];
   const md = renderReport({ samples, vitals, hours: 48, now });
-  assert.match(md, /item:book-index：测试\/正式 总耗时 p50 = 2\.00/);
+  assert.match(md, /item:ssr：测试\/正式 总耗时 p50 = 2\.00/);
   assert.doesNotMatch(md, /9999/);
   assert.match(md, /A5-edge \| 测试站（staging）/);
   assert.match(md, /GET \/api\/feedback：HTTP 500/);
@@ -121,7 +121,7 @@ test('报告：窗口外样本不算；有测试/正式比值；三节齐全', (
   assert.match(md, /\| 条目页 \| 正式站（www） \| 1 \| 0 \| 3000 [^\n]*\n\| 条目页 \| 测试站（staging） \| 1 \| 0 \| 900 /, '正式站与测试站条目页并排');
 });
 
-test('新站挂死：连续 2 次连不上就跳过余下页面，不拖垮整轮', async () => {
+test('目标挂死：连续 2 次连不上就跳过余下页面，不拖垮整轮', async () => {
   const cfg = { ...loadConfig(), api: `${fake.base}/api`, timeoutMs: 3000 };
   const targets = [{ name: 'new', label: '新', base: 'http://127.0.0.1:1', alert: false, pages: { home: '/', 'item:ssr': '/item/{id}' } }];
   let calls = 0;
