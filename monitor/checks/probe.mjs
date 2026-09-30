@@ -12,15 +12,26 @@ import { cmpVersion, uiVersionFromHtml } from '../lib/version.mjs';
 
 const H = 3600 * 1000;
 
-/** A1 正式站首页：200 且带版本 meta（meta 丢了 e2e 的版本门禁会静默跳过一批用例） */
+/**
+ * A1 正式站首页：200 且带版本 meta（meta 丢了 e2e 的版本门禁会静默跳过一批用例）；
+ * 并核对页面 meta 里的 bim 版本与 /api/version 报的 bimUi 一致——
+ * 不一致说明页面缓存（或半截部署）里混着两个版本（overview#304）。
+ */
 export async function homePage(ctx) {
   const { cfg } = ctx;
   const r = await request(bust(`${cfg.www}/`), { timeoutMs: cfg.timeoutMs });
   const v = r.status === 200 ? uiVersionFromHtml(r.text) : null;
   ctx.memo.prodUiVersion = v;
+  const ver = await request(bust(`${cfg.www}/api/version`), { timeoutMs: cfg.timeoutMs });
+  const api = ver.status === 200 ? parseJson(ver.text)?.bimUi : null;
+  let match;
+  if (!v) match = part('meta 与 /api/version 的 bim 版本一致', 'skip', '首页读不到版本', '一致');
+  else if (!api) match = part('meta 与 /api/version 的 bim 版本一致', 'skip', ver.status === 200 ? '/api/version 无 bimUi' : describe(ver), '一致', '版本接口另由 A5 检查');
+  else match = part('meta 与 /api/version 的 bim 版本一致', v === api ? 'ok' : 'fail', `meta ${v} / api ${api}`, '一致', '页面缓存或部署混了两个版本');
   return aggregate('A1-home', '正式站首页', [
     part('首页', r.status === 200 ? 'ok' : 'fail', describe(r), 'HTTP 200'),
     part('bim-ui-version meta', r.status !== 200 ? 'skip' : (v ? 'ok' : 'fail'), v ?? '（缺）', '存在'),
+    match,
   ]);
 }
 
@@ -170,19 +181,23 @@ export function sameCommit(a, b) {
   return Math.min(x.length, y.length) >= 7 && (x.startsWith(y) || y.startsWith(x));
 }
 
-/** A4 条目页：正式站 /book-index?id=、测试站 SSR /item/<id> 含书名 */
+/** A4 条目页：正式站与测试站的 SSR /item/<id> 都要 200 且 HTML 含书名（SSR 回退成空壳时会缺） */
 export async function itemPages(ctx) {
   const { cfg, anchors } = ctx;
   const id = anchors.entries.work;
-  const a = await request(bust(`${cfg.www}/book-index?id=${id}`), { timeoutMs: cfg.timeoutMs });
   // 条目页不能挂 `?_=`（会被 308 成干净地址），用白名单里的 page 绕缓存，见 bustItem
-  const b = await request(bustItem(`${cfg.staging}/item/${id}`), { timeoutMs: cfg.timeoutMs });
-  const has = b.status === 200 && b.text.includes(anchors.workTitle);
-  return aggregate('A4-item-pages', '条目页', [
-    part(`正式站 /book-index?id=${id}`, a.status === 200 ? 'ok' : 'fail', describe(a), 'HTTP 200'),
-    part(`测试站 /item/${id}`, b.status === 200 ? 'ok' : 'fail', describe(b), 'HTTP 200'),
-    part('测试站 HTML 含书名', b.status !== 200 ? 'skip' : (has ? 'ok' : 'fail'), has ? `含「${anchors.workTitle}」` : '不含', `含「${anchors.workTitle}」`, 'SSR 回退成空壳时会缺'),
-  ]);
+  const sites = [['正式站', cfg.www]];
+  if (cfg.staging !== cfg.www) sites.push(['测试站', cfg.staging]);
+  const parts = [];
+  for (const [label, base] of sites) {
+    const b = await request(bustItem(`${base}/item/${id}`), { timeoutMs: cfg.timeoutMs });
+    const has = b.status === 200 && b.text.includes(anchors.workTitle);
+    parts.push(
+      part(`${label} /item/${id}`, b.status === 200 ? 'ok' : 'fail', describe(b), 'HTTP 200'),
+      part(`${label} HTML 含书名`, b.status !== 200 ? 'skip' : (has ? 'ok' : 'fail'), has ? `含「${anchors.workTitle}」` : '不含', `含「${anchors.workTitle}」`, 'SSR 回退成空壳时会缺'),
+    );
+  }
+  return aggregate('A4-item-pages', '条目页', parts);
 }
 
 // F1 回归：公开反馈列表里不许出现邮箱或手机号

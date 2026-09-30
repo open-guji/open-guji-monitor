@@ -64,6 +64,8 @@ const CASES = [
   ['A3-data-bucket', 'CDN 未刷新：version.json 落后 latest.json', (f) => { f.versionCommit = 'fff000fff000fff000fff000fff000fff000fff0'; }],
   ['A3-data-bucket', '锚点变成墓碑', (f) => { f.entryTombstone = true; }],
   ['A4-item-pages', '测试站条目页缺书名', (f) => { f.itemTitle = 'Loading…'; }],
+  ['A4-item-pages', '正式站条目页缺书名（SSR 回退成空壳）', (f) => { f.prodItemTitle = 'Loading…'; }],
+  ['A1-home', '正式站页面 bim 版本与 /api/version 不一致', (f) => { f.apiBimUi = '0.0.1'; }],
   ['A5-edge', '公开反馈泄露手机号', (f) => { f.feedbackItems = [{ id: 'fb_2_b', content: '电话 13912345678', createdAt: new Date().toISOString() }]; }],
   ['A5-edge', '/api/auth/me 未登录却 200', (f) => { f.authMeStatus = 200; }],
   ['A6-staging', '测试站 robots 被放开', (f) => { f.robots = 'User-agent: *\nAllow: /\n'; }],

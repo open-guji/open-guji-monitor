@@ -21,7 +21,7 @@ export function defaultFaults() {
     meiliHealth: 200, searchDelayMs: 0, searchHits: 500, worksFilterStatus: 200,
     latestStatus: 200, versionCommit: COMMIT, entryTombstone: false, manifestRootBody: '{"root":"x"}',
     l2Missing: null,
-    bookIndexStatus: 200, itemTitle: '史記',
+    bookIndexStatus: 200, itemTitle: '史記', prodItemTitle: '史記', apiBimUi: null,
     feedbackItems: [{ id: 'fb_1_a', content: '好', pageUrl: 'https://www.kaiyuanguji.com/', createdAt: new Date().toISOString() }],
     authMeStatus: 401, oauthStatus: 400,
     stagingStatus: 200, robots: 'User-agent: *\nDisallow: /\n',
@@ -47,7 +47,18 @@ export async function startFake() {
     const f = faults;
     const html = (v, extra = '') => `<html><head><meta name="bim-ui-version" content="${v}"/></head><body>${extra}</body></html>`;
 
+    // 模拟网站 S1（overview#280）：条目页带白名单之外的参数 → 308 到干净地址
+    const item = (ui, title) => {
+      const ITEM_QUERY_WHITELIST = ['tab', 'juan', 'page', 'mode', 'collection', 'redirected_from', 'no_redirect'];
+      const extra = [...u.searchParams.keys()].filter((k) => !ITEM_QUERY_WHITELIST.includes(k));
+      if (extra.length) { res.writeHead(308, { location: p }); return res.end(); }
+      return send(res, 200, html(ui, `<h1>${title}</h1>`), 'text/html');
+    };
+
     // ── www
+    if (p === '/www/api/version') return send(res, 200, { web: 'x', bimUi: f.apiBimUi ?? f.prodUi });
+    if (p.startsWith('/www/item/')) return item(f.prodUi, f.prodItemTitle);
+    if (p === '/stg/api/version') return send(res, 200, { web: 'x', bimUi: f.stagingUi });
     if (p === '/www/') return send(res, f.homeStatus, html(f.prodUi), 'text/html');
     if (p === '/www/book-index') return send(res, f.bookIndexStatus, html(f.prodUi), 'text/html');
     if (p === '/www/api/feedback') return send(res, 200, { success: true, items: f.feedbackItems });
@@ -84,13 +95,7 @@ export async function startFake() {
     // ── staging
     if (p === '/stg/') return send(res, f.stagingStatus, html(f.stagingUi), 'text/html');
     if (p === '/stg/robots.txt') return send(res, 200, f.robots, 'text/plain');
-    if (p.startsWith('/stg/item/')) {
-      // 模拟网站 S1（overview#280）：条目页带白名单之外的参数 → 308 到干净地址
-      const ITEM_QUERY_WHITELIST = ['tab', 'juan', 'page', 'mode', 'collection', 'redirected_from', 'no_redirect'];
-      const extra = [...u.searchParams.keys()].filter((k) => !ITEM_QUERY_WHITELIST.includes(k));
-      if (extra.length) { res.writeHead(308, { location: p }); return res.end(); }
-      return send(res, 200, html(f.stagingUi, `<h1>${f.itemTitle}</h1>`), 'text/html');
-    }
+    if (p.startsWith('/stg/item/')) return item(f.stagingUi, f.itemTitle);
     // ── GitHub API
     if (p.startsWith('/gh/repos/')) {
       gh.calls.push(`${req.method} ${p}`);

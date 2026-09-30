@@ -1,10 +1,9 @@
 /**
- * 新旧架构对比的 HTTP 采样（任务书 §六）。每轮 A 探测顺带跑一次：
+ * 正式站（www）与测试站（staging）的 HTTP 采样对比（任务书 §六；CUT2 后两边都是全栈）。每轮 A 探测顺带跑一次：
  *   · 每个目标 × 每类页面（首页／条目页×10 个 id／全文页）记 首字节时间、总耗时、状态、CDN 命中；
  *   · 搜索接口两边前端都直连 api.kaiyuanguji.com，是同一个后端，记在 target=shared 下；
- *   · 不告警的目标（新站）另跑一遍适用的 A 类检查，结果只进样本。
- * 注意：旧站是静态壳，HTML 里没有条目内容（浏览器再去数据桶取）；新站 /item 是服务端直出。
- * 所以 HTTP 层的数只比「文档本身」，用户真正看到内容的快慢看浏览器指标（LCP），见 browser-vitals.mjs。
+ *   · 不告警的目标（测试站）另跑一遍适用的 A 类检查，结果只进样本。
+ * 注意：HTTP 层的数只比「文档本身」，用户真正看到内容的快慢看浏览器指标（LCP），见 browser-vitals.mjs。
  */
 import { homePage, itemPages, edgeFunctions, tlsCerts } from './probe.mjs';
 import { COMPARE_IDS } from '../perf-config.mjs';
@@ -65,7 +64,7 @@ export function expandPages(target, ids = COMPARE_IDS) {
 export async function samplePerf({ cfg, targets, now, measureFn = measure }) {
   const t = new Date(now).toISOString();
   // 单请求上限 10 秒；连续 2 次连不上（status 0）就认定该目标本轮不可达，余下页面记为跳过，
-  // 免得一个挂死的新站把 5 分钟的 job 拖超时、连累 A 类告警
+  // 免得一个挂死的目标把 5 分钟的 job 拖超时、连累 A 类告警
   const timeoutMs = Math.min(cfg.timeoutMs, 10000);
   const perTarget = targets.map(async (tg) => {
     const rows = [];

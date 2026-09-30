@@ -53,7 +53,8 @@
 每项由若干子项组成，报告里每个子项都列「实测／阈值」。阈值都能用环境变量覆盖（`config.mjs`）。
 
 ### A1-home 正式站首页
-- `https://www.kaiyuanguji.com/` 200，且 HTML 带 `<meta name="bim-ui-version">`（丢了 e2e 的版本门禁会静默跳过一批用例）。
+- `https://www.kaiyuanguji.com/` 200，且 HTML 带 `<meta name="bim-ui-version">`（丢了 e2e 的版本门禁会静默跳过一批用例）；
+- 页面 meta 里的 bim 版本与 `/api/version` 的 `bimUi` **一致**（CUT2 后 www 是全栈，两处都由同一次构建写入；不一致说明页面缓存或半截部署里混了两个版本）。`/api/version` 读不到时只 skip，不告警。
 - 误报：几乎不会；连续两次（≥15 分钟）打不开就是真挂。
 
 ### A1-deploy-lag 部署停更
@@ -83,7 +84,7 @@
 - 误报：部署切换的几分钟里 version 与 latest 可能短暂不一致——连续 2 次才开单足以滤掉。锚点被升格／合并时换 anchors.ts。
 
 ### A4-item-pages 条目页
-- 正式站 `/book-index?id=<史記>` 200；测试站 SSR `/item/<史記>` 200 且 HTML 含「史記」（SSR 回退成空壳时会缺）。
+- 正式站与测试站的 SSR `/item/<史記>` 都 200 且 HTML 含「史記」（SSR 回退成空壳时会缺）。CUT2 后 `/book-index?id=` 只是 308 到 `/item/`，不再单测。
 
 ### A5-edge 边缘函数
 - `GET /api/feedback` 200 且公开列表**无邮箱／手机号**（F1 脱敏回归；只报「条目 id.字段」，不回显内容）；
@@ -116,23 +117,22 @@
 ### C1-contract e2e 契约冒烟（正式站）
 - `npx playwright test --project=contract`（纯 HTTP，不装浏览器），有用例挂即 fail；重试后才过记 warn。报告作 artifact 留 7 天。
 
-## 新旧架构对比（任务书 §六，切域名前用）
+## 正式站与测试站对比
 
-正式站要从静态导出（www）切到全栈新架构（`kyg-ssr-spike`，预览 `ssr-test.kaiyuanguji.com`）。切之前拿监控数据比：
+CUT2（2026-09-28）后 www 已是全栈（`kyg-ssr-spike`），原先的「旧·静态 vs 新·全栈（ssr-test）」对比不再成立，改为 **正式站 www vs 测试站 staging**（两边同一套页面）：
 
-- **HTTP 采样**（每 15 分钟，A 那一轮顺带）：两边各打 首页、条目页（同一组 10 个 id，热 4 冷 6，见 `perf-config.mjs`）、
-  全文页（整理本卷四），新站另多 `/item/<id>`（静态站没有这条路由）；搜索两边前端都直连 `api.kaiyuanguji.com`，记为「共用」。
+- **HTTP 采样**（每 15 分钟，A 那一轮顺带）：两边各打 首页、`/item/<id>`（同一组 10 个 id，热 4 冷 6，见 `perf-config.mjs`）、
+  全文页（整理本卷四）；搜索两边前端都直连 `api.kaiyuanguji.com`，记为「共用」。
   每条记 首字节时间、总耗时、状态码、CDN 命中（`eo-cache-status` 等头）。单请求上限 10 秒，连续 2 次连不上就跳过该目标余下页面。
-- **影子检查**：新站跑同一组 A 类检查（首页、条目页、边缘函数、证书），**只记录，不开 issue**。
+- **影子检查**：测试站跑同一组 A 类检查（首页、条目页、边缘函数、证书），**只记录，不开 issue**（正式站由 A 类本身盯）。
 - **浏览器指标**（每 6 小时，C 那一轮顺带）：Playwright Chromium 冷缓存各测首页＋3 个条目页（热作品、人物、冷作品）的
   LCP、可交互时间（TTI 近似：DCL 与最后一个长任务结束的较大者）、TBT、FCP。
 - 样本存 Actions cache（`.monitor/perf/samples.jsonl`、`.monitor-smoke/perf/vitals.jsonl`，各留 72 小时）。
 - **报告**：`node monitor/compare-report.mjs --hours 48`，出 markdown：各（目标×页面类）的样本数、错误率、首字节／总耗时 p50／p95、
-  CDN 命中率，同类页面「新/旧」比值；影子检查失败率；浏览器指标 p50／p95。
+  CDN 命中率，同类页面「测试/正式」比值；影子检查失败率；浏览器指标 p50／p95。
   C 每一轮自动出一份 24 小时的进 Step Summary 并传 artifact；要 48 小时的，手动 workflow_dispatch `suite=compare, hours=48`。
-- 读数要点：旧站 HTML 是静态壳、不含条目内容，所以 HTTP 一节只比「文档多快到」；用户多快看到内容看 LCP。
-- 换新站地址：仓库变量或 workflow env 里设 `MON_COMPARE_NEW`；整组目标可用 `MON_COMPARE_TARGETS`（JSON）覆盖。
-- 切完域名、旧站下线后：把 `perf-config.mjs` 里的新站改成 `alert: true` 或直接删掉对比（A 类本身已经在盯 www）。
+- 换测试站地址：`MON_COMPARE_NEW`（缺省用 `MON_STAGING`）；整组目标可用 `MON_COMPARE_TARGETS`（JSON）覆盖。
+- 已不再有 `ssr-test` 目标。
 
 ## 本地跑
 

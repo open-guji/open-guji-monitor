@@ -22,8 +22,8 @@ export function quantile(values, p) {
   return a[idx];
 }
 
-// 表里旧站在前、新站在后、共用最后
-const ORDER = { old: 0, new: 1, shared: 2 };
+// 表里正式站在前、测试站在后、共用最后
+const ORDER = { prod: 0, staging: 1, shared: 2 };
 const byTarget = (a, b) => (ORDER[a.target] ?? 9) - (ORDER[b.target] ?? 9) || a.target.localeCompare(b.target);
 const fmtMs = (v) => (v == null ? '—' : `${Math.round(v)}`);
 const pct = (n, d) => (d ? `${((n / d) * 100).toFixed(1)}%` : '—');
@@ -66,7 +66,7 @@ export function summarizeChecks(rows) {
 /** 浏览器样本 → 每（目标, 页面）LCP／TTI／TBT 的 p50／p95 */
 export function summarizeVitals(rows) {
   const out = [];
-  // 按页面类（首页／条目页）分组：旧站条目页是 /book-index?id=、新站是 /item/，路径不同但要并排比
+  // 按页面类（首页／条目页）分组：两边条目页都是 /item/<id>，按页面类并排比
   for (const [k, g] of groupBy(rows, (r) => `${r.target}\t${r.kind || r.page}`)) {
     const [target, page] = k.split('\t');
     const ok = g.filter((r) => r.ok);
@@ -97,7 +97,7 @@ export function renderReport({ samples, vitals, hours, now = Date.now(), targets
     '',
     '### 一、HTTP（文档本身；毫秒，只算成功的请求）',
     '',
-    '> 旧站 HTML 是静态壳、不含条目内容，浏览器还要再去数据桶取；新站 `/item` 是服务端直出。所以这一节只比「文档多快到」，用户多快看到内容看第三节 LCP。',
+    '> 两边都是全栈直出的 `/item/<id>`；这一节比「文档多快到」，用户多快看到内容看第三节 LCP。',
     '',
     '| 页面类 | 目标 | 样本 | 错误率 | 首字节 p50 | 首字节 p95 | 总耗时 p50 | 总耗时 p95 | CDN 命中 |',
     '|---|---|---|---|---|---|---|---|---|',
@@ -108,17 +108,17 @@ export function renderReport({ samples, vitals, hours, now = Date.now(), targets
     lines.push(`| ${r.kind} | ${L(r.target)} | ${r.n} | ${err} | ${fmtMs(r.ttfbP50)} | ${fmtMs(r.ttfbP95)} | ${fmtMs(r.totalP50)} | ${fmtMs(r.totalP95)} | ${r.hitRate == null ? '看不出' : pct(r.hitRate * r.hitKnown, r.hitKnown)} |`);
   }
 
-  // 同类页面新/旧 p50 之比，一眼看出快慢
+  // 同类页面测试站/正式站 p50 之比，一眼看出快慢
   const byKind = groupBy(http, (r) => r.kind);
   const ratios = [];
   for (const [kind, g] of byKind) {
-    const o = g.find((r) => r.target === 'old');
-    const n = g.find((r) => r.target === 'new');
-    if (o?.totalP50 && n?.totalP50) ratios.push(`${kind}：新/旧 总耗时 p50 = ${(n.totalP50 / o.totalP50).toFixed(2)}，p95 = ${n.totalP95 && o.totalP95 ? (n.totalP95 / o.totalP95).toFixed(2) : '—'}`);
+    const o = g.find((r) => r.target === 'prod');
+    const n = g.find((r) => r.target === 'staging');
+    if (o?.totalP50 && n?.totalP50) ratios.push(`${kind}：测试/正式 总耗时 p50 = ${(n.totalP50 / o.totalP50).toFixed(2)}，p95 = ${n.totalP95 && o.totalP95 ? (n.totalP95 / o.totalP95).toFixed(2) : '—'}`);
   }
   if (ratios.length) lines.push('', ...ratios.map((x) => `- ${x}`));
 
-  lines.push('', '### 二、可用性（新站跑同一组 A 类检查，只记录不告警）', '');
+  lines.push('', '### 二、可用性（测试站跑同一组 A 类检查，只记录不告警）', '');
   const checks = summarizeChecks(s);
   if (!checks.length) lines.push('（窗口内无检查样本）');
   else {
