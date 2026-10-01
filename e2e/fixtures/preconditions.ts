@@ -22,7 +22,7 @@
  * 跳过会带着原因出现在 Playwright 报告里，覆盖真的掉了看得见。
  */
 import { test, type APIRequestContext } from '@playwright/test';
-import { TARGET } from './anchors';
+import { DATA_BASE, TARGET } from './anchors';
 import { dataUrl, fetchLatest, type DataVersion } from './version';
 
 /* ------------------------------------------------------------------ *
@@ -83,6 +83,48 @@ export async function requireUiVersion(
     test.skip(
         cmpVersion(live, min) < 0,
         `线上 book-index-ui ${live} < ${min}，「${feature}」尚未上线——升级版本后本用例自动生效`,
+    );
+}
+
+/* ------------------------------------------------------------------ *
+ * 新结构文本数据（overview#307）
+ * ------------------------------------------------------------------ */
+
+/**
+ * 阅读页只认新结构（items/<id>/manifest.json + <key>/）。文本迁移落地前，站点上这个条目的
+ * /read/<id> 是 404；这类用例断言的是「迁移后」的行为，前提不在就跳过，迁移后自动生效。
+ * 只看页面状态码，不猜数据布局（散列布局、版本号前缀都不用管）。
+ */
+export async function requireNewTextData(request: APIRequestContext, id: string, feature: string): Promise<void> {
+    const res = await request.get(`${TARGET}/read/${id}`, { maxRedirects: 0 });
+    test.skip(
+        res.status() === 404,
+        `${TARGET} 上 ${id} 还没有新结构文本数据（/read/${id} 为 404）；「${feature}」待文本迁移落地后自动生效`,
+    );
+}
+
+/**
+ * 阅读首页分区数据（overview#308：read/sections.json 与 read/period/…）。新的打包脚本跑过一版数据之前，
+ * /read 只显示「正在准备」、/read?period=… 是 404；这类用例断言的是「数据上线后」的行为，前提不在就跳过。
+ * 同样只看页面，不猜数据布局。
+ */
+export async function requireReadSections(request: APIRequestContext, feature: string): Promise<void> {
+    const res = await request.get(`${TARGET}/read?period=song`, { maxRedirects: 0 });
+    test.skip(
+        res.status() === 404,
+        `${TARGET} 上还没有阅读首页分区数据（/read?period=song 为 404）；「${feature}」待新数据上线后自动生效`,
+    );
+}
+
+/**
+ * 元数据首页分区数据（meta-home/sections.json，overview#322 块 A）上线了没有。
+ * /book-index 是静态页，分区数据在浏览器里取；数据没上线时页面只出检索框、最近浏览与授权说明，分区用例跳过。
+ */
+export async function requireMetaHomeData(request: APIRequestContext, feature: string): Promise<void> {
+    const res = await request.get(`${DATA_BASE}/current/meta-home/sections.json?_=${Date.now()}`);
+    test.skip(
+        !res.ok(),
+        `${DATA_BASE} 上还没有元数据首页分区数据（current/meta-home/sections.json 为 ${res.status()}）；「${feature}」待新数据上线后自动生效`,
     );
 }
 
