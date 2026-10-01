@@ -6,7 +6,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { ANCHORS, COUNT_RANGES, DATA_BASE } from '../fixtures/anchors';
-import { fetchLatest, dataUrl } from '../fixtures/version';
+import { fetchLatest, dataUrl, versionKey } from '../fixtures/version';
 
 test.describe('数据管线契约', () => {
     test('latest.json 可达、格式正确、不陈旧', async ({ request }) => {
@@ -73,28 +73,31 @@ test.describe('数据管线契约', () => {
         expect(entry.related_works?.length ?? 0).toBeGreaterThanOrEqual(ANCHORS.work.minRelatedWorks);
     });
 
-    test('整理本清单档用新文件名 index.json', async ({ request }) => {
-        // 2026-08-26 归一把 collated_edition_index.json 改名 index.json，
-        // 前端一直请求旧名导致整理本全线 404、tab 消失。
+    test('整理本在新结构里：manifest.json（default=整理本）＋ default/index.json 章目录', async ({ request }) => {
+        // overview#307：整理本迁到 items/<id>/manifest.json ＋ items/<id>/default/{index.json,NNN.json}；
+        // 旧的 collated_edition/index.json 不再有（只认新结构）。
         const v = await fetchLatest(request);
-        const base = `current/items/${ANCHORS.collated.id}/collated_edition`;
+        const base = `current/items/${ANCHORS.collated.id}`;
 
-        const res = await request.get(dataUrl(`${base}/index.json`, v.commitId));
-        expect(res.ok(), '整理本清单档 index.json 取不到').toBeTruthy();
+        const mres = await request.get(dataUrl(`${base}/manifest.json`, v.commitId));
+        expect(mres.ok(), 'manifest.json 取不到——文本没迁移到新结构，或没打包进来').toBeTruthy();
+        const manifest = await mres.json();
+        expect(manifest.id).toBe(ANCHORS.collated.id);
+        expect(manifest.versions?.[0]?.key, 'versions[0] 必须是 default').toBe('default');
+        expect(manifest.versions[0].kind, '这部书的主版本应是整理本').toBe('collated');
+        expect(manifest.versions[0].license).toBeTruthy();
 
+        const res = await request.get(dataUrl(`${base}/default/index.json`, v.commitId));
+        expect(res.ok(), '整理本章目录 default/index.json 取不到').toBeTruthy();
         const idx = await res.json();
         expect(idx.work_id).toBe(ANCHORS.collated.id);
 
-        // juan_files 是卷数的唯一可信来源，前端「共 N 卷」取它的长度。
-        // 曾有 total_juan/total_categories/total_sections 三个统计字段与之
-        // 并存，是整理时写入、之后没人维护的独立声明，实测 4 部整理本对不上
-        // （d59f2mp38qv4 声明 1 卷、实际 43 个卷文件，页面就显示「共 1 卷」）。
-        // 2026-09-03 已从数据、类型、前端一并删除——这里断言它们不再出现，
-        // 防止哪天又被写回去。
-        expect(Array.isArray(idx.juan_files), 'juan_files 不是数组').toBeTruthy();
-        expect(idx.juan_files.length, 'juan_files 为空').toBe(ANCHORS.collated.juanFileCount);
-        for (const k of ['total_juan', 'total_categories', 'total_sections']) {
-            expect(idx[k], `${k} 是已废弃的不可信统计字段，不应再写入`).toBeUndefined();
+        // chapters 是章数的唯一可信来源（旧的 juan_files／total_juan 等都不再有）
+        expect(Array.isArray(idx.chapters), 'chapters 不是数组').toBeTruthy();
+        expect(idx.chapters.length, 'chapters 条数不对').toBe(ANCHORS.collated.juanFileCount);
+        expect(idx.chapters[0].file, '章文件名是三位编号（不带扩展名）').toBe('001');
+        for (const k of ['juan_files', 'total_juan', 'total_categories', 'total_sections']) {
+            expect(idx[k], `${k} 是旧结构／已废弃字段，不应出现在新结构里`).toBeUndefined();
         }
     });
 
@@ -104,7 +107,7 @@ test.describe('数据管线契约', () => {
         const v = await fetchLatest(request);
         const res = await request.get(
             dataUrl(
-                `current/items/${ANCHORS.collated.id}/collated_edition/${ANCHORS.collated.sampleJuanFile}`,
+                `current/items/${ANCHORS.collated.id}/default/${ANCHORS.collated.sampleJuanFile.replace(/^juan\/|\.json$/g, '')}.json`,
                 v.commitId,
             ),
         );
@@ -163,4 +166,24 @@ test.describe('数据管线契约', () => {
             'textCommitId 缺失 = book-text 没打包，整理本/全文会全空',
         ).toMatch(/^[0-9a-f]{40}$/);
     });
+
+    // 派生产物（总目 catalog/、阅读首页 read/、元数据首页 meta-home/）由网站打包脚本生成：脚本改了、数据仓没动，
+    // 产物变了而旧 cacheKey 不变，`?v=<cacheKey>` 的 URL 一字不变，CDN 继续吐旧产物（10-01：build-meta-home 修了 shelf，
+    // 页面取到的还是 shelf: null，测试站 verify 连挂两轮）。cacheKey 现在并进了产物内容摘要；这条按**前端实际用的 URL**
+    // （只带 ?v=<版本键>、不挂时间戳）取，与绕开缓存取到的源站内容比，不一致就是 CDN 在吐旧的。
+    for (const rel of ['meta-home/sections.json', 'catalog/tree.json', 'read/sections.json']) {
+        test(`派生产物 current/${rel}：按前端的带版本键 URL 取到的就是源站现状（CDN 没吐旧的）`, async ({ request }) => {
+            const latest = await fetchLatest(request);
+            const key = versionKey(latest);
+            const asFrontend = await request.get(`${DATA_BASE}/current/${rel}?v=${key}`);
+            test.skip(asFrontend.status() === 404, `${rel} 这个站点没有（旧版产物）`);
+            expect(asFrontend.ok(), `${rel} 带 ?v=${key} 取不到`).toBeTruthy();
+            const origin = await request.get(dataUrl(`current/${rel}`, key));
+            expect(origin.ok()).toBeTruthy();
+            expect(
+                await asFrontend.json(),
+                `${rel} 带 ?v=${key} 取到的与源站现状不一致——cacheKey 没随产物变，CDN 在吐旧产物（overview#322）`,
+            ).toEqual(await origin.json());
+        });
+    }
 });
