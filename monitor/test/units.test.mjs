@@ -9,6 +9,7 @@ import { smokeFromReport } from '../checks/smoke.mjs';
 import { readAnchors, readRequiredUi } from '../lib/context.mjs';
 import { cmpVersion, rangeFloor, uiVersionFromHtml } from '../lib/version.mjs';
 import { aggregate, part } from '../lib/result.mjs';
+import { describe as describeResp, edgeHeaders } from '../lib/http.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -69,4 +70,14 @@ test('commit 比较：短哈希与全哈希按前缀认同（线上 latest 12 �
   assert.ok(sameCommit('501935e5be70c1b5c99ac2e326052443a6f09c71', '501935e5be70'));
   assert.ok(!sameCommit('501935e5be70c1b5c99ac2e326052443a6f09c71', '5cde8afa74a0'));
   assert.ok(!sameCommit('50', '501935e5be70'), '过短不认');
+});
+
+test('非 200 的探测描述带 EdgeOne 的 EO-LOG-UUID／Eo-Cache-Status／Date（overview#484）', () => {
+  const headers = new Headers({ 'EO-LOG-UUID': 'u-1', 'Eo-Cache-Status': 'MISS', Date: 'Wed, 08 Oct 2026 04:40:00 GMT' });
+  assert.equal(describeResp({ status: 525, ms: 5700, headers, error: null }), 'HTTP 525，5700ms [EO-LOG-UUID=u-1 Eo-Cache-Status=MISS Date=Wed, 08 Oct 2026 04:40:00 GMT]');
+  // 200 不附；没有这些头（不是 EdgeOne 回的）也不附；连不上没有响应
+  assert.equal(describeResp({ status: 200, ms: 120, headers, error: null }), 'HTTP 200，120ms');
+  assert.equal(describeResp({ status: 522, ms: 9000, headers: new Headers(), error: null }), 'HTTP 522，9000ms');
+  assert.equal(describeResp({ status: 0, ms: 20000, headers: new Headers(), error: '超时 20000ms' }), '连不上（超时 20000ms）');
+  assert.equal(edgeHeaders({ headers: new Headers({ date: 'x' }) }), 'Date=x');
 });

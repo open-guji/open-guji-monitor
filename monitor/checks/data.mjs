@@ -21,7 +21,7 @@ async function summary(ctx, path, token, base = ctx.cfg.www) {
 /** 汇总接口的非 200 怎么判：503=生产没配变量（skip）；401=两边 token 对不上（fail，要人修） */
 function summaryFailure(label, r, j, envName) {
   if (r.status === 503) return part(label, 'skip', `生产未配 ${envName}（503）`, '', '待用户在 EdgeOne 控制台配置');
-  if (r.status === 401) return part(label, 'fail', '401', '200', `GitHub secret 与生产的 ${envName} 不一致`);
+  if (r.status === 401) return part(label, 'fail', describe(r), '200', `GitHub secret 与生产的 ${envName} 不一致`);
   if (r.status === 200 && j && j.count === undefined) return part(label, 'skip', '汇总接口未上线', '', '本 PR 合并部署后生效');
   return part(label, 'fail', describe(r), '200');
 }

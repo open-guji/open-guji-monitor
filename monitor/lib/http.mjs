@@ -44,7 +44,20 @@ export function bustItem(url) {
   return `${url}${url.includes('?') ? '&' : '?'}page=${Date.now()}`;
 }
 
-/** 响应的一句话描述，写进报告 */
+/**
+ * 非 200 响应里 EdgeOne 排障用的头：`EO-LOG-UUID=… Eo-Cache-Status=… Date=…`，没有的头不写。
+ * 用户拿 UUID 到 EdgeOne 控制台的日志里按 UUID 查这一次请求（overview#484）。
+ */
+export function edgeHeaders(r) {
+  const h = r?.headers;
+  if (!h || typeof h.get !== 'function') return '';
+  return ['EO-LOG-UUID', 'Eo-Cache-Status', 'Date'].map((k) => [k, h.get(k)]).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(' ');
+}
+
+/** 响应的一句话描述，写进报告；非 200 时附 EdgeOne 的日志 UUID、缓存状态与时间 */
 export function describe(r) {
-  return r.status === 0 ? `连不上（${r.error}）` : `HTTP ${r.status}，${r.ms}ms`;
+  if (r.status === 0) return `连不上（${r.error}）`;
+  const base = `HTTP ${r.status}，${r.ms}ms`;
+  const hdr = r.status === 200 ? '' : edgeHeaders(r);
+  return hdr ? `${base} [${hdr}]` : base;
 }
