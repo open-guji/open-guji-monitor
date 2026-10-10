@@ -8,13 +8,13 @@ const num = (k, d) => Number(env(k, d));
 
 export function loadConfig() {
   return {
-    www: env('MON_WWW', 'https://www.kaiyuanguji.com'),
+    www: env('MON_WWW', 'https://www.openguji.com'),
     data: env('MON_DATA', 'https://data.kaiyuanguji.com'),
     api: env('MON_API', 'https://api.kaiyuanguji.com'),
     staging: env('MON_STAGING', 'https://staging.kaiyuanguji.com'),
     // 公开只读搜索 key：本就随 JS 发给每个浏览器，非机密（同 e2e/fixtures/anchors.ts）
     meiliKey: env('MON_MEILI_KEY', '1b0b438f7eadd34e1a6b53c76d63bd3614822d3ec9856251c9340a78456c5465'),
-    tlsHosts: env('MON_TLS_HOSTS', 'www.kaiyuanguji.com,data.kaiyuanguji.com,api.kaiyuanguji.com,staging.kaiyuanguji.com')
+    tlsHosts: env('MON_TLS_HOSTS', 'www.openguji.com,data.kaiyuanguji.com,api.kaiyuanguji.com,staging.kaiyuanguji.com')
       .split(',').map((s) => s.trim()).filter(Boolean),
 
     timeoutMs: num('MON_TIMEOUT_MS', 20000),

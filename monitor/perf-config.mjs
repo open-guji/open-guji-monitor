@@ -28,7 +28,7 @@ const VITAL_IDS = ['d59f20aowb9c', 'hixhd2h9bk4b', 'd59f2rxf35ds'];
 
 export function loadTargets(env = process.env) {
   if (env.MON_COMPARE_TARGETS) return JSON.parse(env.MON_COMPARE_TARGETS);
-  const prodBase = env.MON_WWW || 'https://www.kaiyuanguji.com';
+  const prodBase = env.MON_WWW || 'https://www.openguji.com';
   const stagingBase = env.MON_COMPARE_NEW || env.MON_STAGING || 'https://staging.kaiyuanguji.com';
   const pages = { home: '/', 'item:ssr': '/item/{id}', fulltext: FULLTEXT };
   const vitals = ['/', ...VITAL_IDS.map((id) => `/item/${id}`)];
