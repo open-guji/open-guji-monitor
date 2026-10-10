@@ -21,7 +21,7 @@ after(async () => { await fake.close(); });
 
 test('默认目标：正式站 www 告警、测试站 staging 不告警；条目页 10 个 id', () => {
   const [o, n] = loadTargets({});
-  assert.equal(o.base, 'https://www.kaiyuanguji.com');
+  assert.equal(o.base, 'https://www.openguji.com');
   assert.equal(n.base, 'https://staging.kaiyuanguji.com');
   assert.equal(o.alert, true);
   assert.equal(n.alert, false);

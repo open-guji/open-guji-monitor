@@ -53,7 +53,7 @@
 每项由若干子项组成，报告里每个子项都列「实测／阈值」。阈值都能用环境变量覆盖（`config.mjs`）。
 
 ### A1-home 正式站首页
-- `https://www.kaiyuanguji.com/` 200，且 HTML 带 `<meta name="bim-ui-version">`（丢了 e2e 的版本门禁会静默跳过一批用例）；
+- `https://www.openguji.com/` 200，且 HTML 带 `<meta name="bim-ui-version">`（丢了 e2e 的版本门禁会静默跳过一批用例）；
 - 页面 meta 里的 bim 版本与 `/api/version` 的 `bimUi` **一致**（CUT2 后 www 是全栈，两处都由同一次构建写入；不一致说明页面缓存或半截部署里混了两个版本）。`/api/version` 读不到时只 skip，不告警。
 - 误报：几乎不会；连续两次（≥15 分钟）打不开就是真挂。
 
