@@ -64,7 +64,7 @@ export const MEILI_KEY =
  */
 export const COUNT_RANGES = {
     works: { min: 60_000, max: 200_000 },
-    books: { min: 12_000, max: 60_000 },
+    books: { min: 12_000, max: 100_000 },
     collections: { min: 40, max: 500 },
     entities: { min: 20_000, max: 200_000 },
 } as const;
