@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../config.mjs';
 import { PROBE_CHECKS, PRIVATE_PROBE_CHECKS } from '../checks/probe.mjs';
 import { DATA_CHECKS } from '../checks/data.mjs';
-import { emptyState } from '../lib/state.mjs';
+import { emptyState, openAfterFor } from '../lib/state.mjs';
 import { makeGithub } from '../lib/alert.mjs';
 import http from 'node:http';
 import { buildContext, runChecks, processAlerts, pushAlerts } from '../run.mjs';
@@ -73,35 +73,41 @@ const CASES = [
 ];
 
 for (const [id, what, inject] of CASES) {
-  test(`故障注入 ${id}：${what} → 第 2 轮开单 → 恢复关单`, async () => {
+  // 个别检查项要连续更多次失败才开单（openAfterFor，A2-search-l1 是 3 次），其余 2 次
+  const N = openAfterFor(id);
+  test(`故障注入 ${id}：${what} → 第 ${N} 轮开单 → 恢复关单`, async () => {
     const t0 = Date.now();
     let state = emptyState();
     inject(fake.faults);
 
-    let r = await round(state, t0);
-    assert.equal(r.results.find((x) => x.id === id).status, 'fail', `${id} 注入后应失败`);
-    assert.equal(fake.gh.issues.size, 0, '第 1 轮不开单');
-    state = r.state;
+    let r;
+    for (let i = 0; i < N - 1; i += 1) {
+      r = await round(state, t0 + i * 15 * 60000);
+      assert.equal(r.results.find((x) => x.id === id).status, 'fail', `${id} 注入后应失败`);
+      assert.equal(fake.gh.issues.size, 0, `第 ${i + 1} 轮不开单`);
+      state = r.state;
+    }
 
-    r = await round(state, t0 + 15 * 60000);
+    const tOpen = t0 + (N - 1) * 15 * 60000;
+    r = await round(state, tOpen);
     state = r.state;
     const opened = [...fake.gh.issues.values()].filter((i) => i.body.includes(`monitor-check:${id}`));
-    assert.equal(opened.length, 1, '第 2 轮开且只开一张单');
+    assert.equal(opened.length, 1, `第 ${N} 轮开且只开一张单`);
     assert.deepEqual(opened[0].labels, ['monitor-test']);
     assert.match(opened[0].title, new RegExp(id));
     assert.match(opened[0].body, /❌/);
     // 没被注入的项不许顺带开单（隔离性）
     assert.equal(fake.gh.issues.size, 1, `只该开 ${id} 一张，实际：${[...fake.gh.issues.values()].map((i) => i.title)}`);
 
-    r = await round(state, t0 + 30 * 60000);
+    r = await round(state, tOpen + 15 * 60000);
     state = r.state;
     assert.equal(opened[0].comments.length, 0, '同样的失败 6 小时内不评论');
 
     fake.reset();
-    r = await round(state, t0 + 45 * 60000);
+    r = await round(state, tOpen + 30 * 60000);
     assert.equal(opened[0].state, 'closed', '恢复后自动关');
     assert.equal(opened[0].state_reason, 'completed');
-    assert.match(opened[0].comments.at(-1), /已恢复.*故障持续约 45 分钟/);
+    assert.match(opened[0].comments.at(-1), /已恢复.*故障持续约 (\d+ 小时 )?\d+ 分钟/);
   });
 }
 

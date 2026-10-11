@@ -31,7 +31,7 @@ import { PROBE_CHECKS, PRIVATE_PROBE_CHECKS } from './checks/probe.mjs';
 import { DATA_CHECKS } from './checks/data.mjs';
 import { smokeFromReport } from './checks/smoke.mjs';
 import { crashed, renderCheck, icon } from './lib/result.mjs';
-import { emptyState, decide, reconcile, pushBaseline, medianOf } from './lib/state.mjs';
+import { emptyState, decide, reconcile, pushBaseline, medianOf, openAfterFor } from './lib/state.mjs';
 import { makeGithub, issueTitle, openBody, commentBody, closeBody } from './lib/alert.mjs';
 import { readRequiredUi, readPkgChangedAt, readAnchors } from './lib/context.mjs';
 import { samplePerf, shadowChecks } from './checks/perf.mjs';
@@ -99,7 +99,7 @@ export async function processAlerts({ results, state, now, gh, runUrl, titlePref
   }
   const nextChecks = { ...checks };
   for (const r of results) {
-    const { next, action } = decide(checks[r.id], r, now);
+    const { next, action } = decide(checks[r.id], r, now, { openAfter: openAfterFor(r.id) });
     nextChecks[r.id] = next;
     if (!action) continue;
     const opts = { now, runUrl, fails: action.fails, reason: action.reason, durationMs: action.durationMs };
