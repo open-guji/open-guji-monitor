@@ -1,7 +1,7 @@
 // 告警状态机：连续 2 次才开、恢复自动关、持续失败不刷屏（任务书 §四·2）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decide, reconcile, medianOf, pushBaseline } from '../lib/state.mjs';
+import { decide, reconcile, medianOf, pushBaseline, openAfterFor, OPEN_AFTER } from '../lib/state.mjs';
 
 const MIN = 60_000;
 const fail = (sig = 'fail:首页') => ({ status: 'fail', sig });
@@ -94,4 +94,31 @@ test('基线取中位数，样本不足不判', () => {
   assert.equal(medianOf([100, 101]), null);
   assert.equal(medianOf([100, 300, 101]), 101);
   assert.equal(pushBaseline(Array(200).fill(1), 2).values.length, 144);
+});
+
+test('A2-search-l1 要连续 3 次失败才开单，其它检查项仍是 2 次（overview#304）', () => {
+  assert.equal(openAfterFor('A2-search-l1'), 3);
+  assert.equal(openAfterFor('A1-home'), OPEN_AFTER);
+  const o = { openAfter: openAfterFor('A2-search-l1') };
+  let r = decide(undefined, fail(), 0, o);
+  assert.equal(r.action, null);
+  r = decide(r.next, fail(), 5 * MIN, o);
+  assert.equal(r.action, null, '第 2 次失败不开');
+  r = decide(r.next, fail(), 10 * MIN, o);
+  assert.equal(r.action.type, 'open', '第 3 次失败才开');
+  assert.equal(r.action.fails, 3);
+  // 中途恢复则重新计数
+  let s = decide(undefined, fail(), 0, o).next;
+  s = decide(s, fail(), 5 * MIN, o).next;
+  s = decide(s, ok, 10 * MIN, o).next;
+  assert.equal(decide(s, fail(), 15 * MIN, o).action, null);
+  // 同样两次失败，A1-home 用默认值就已开单
+  const h = decide(decide(undefined, fail(), 0).next, fail(), 5 * MIN);
+  assert.equal(h.action.type, 'open');
+});
+
+test('reconcile：认回已开的 A2 单时，计数不低于它自己的阈值 3', () => {
+  const s = reconcile({}, new Map([['A2-search-l1', 9]]));
+  assert.equal(s['A2-search-l1'].fails, 3);
+  assert.equal(s['A2-search-l1'].issue, 9);
 });

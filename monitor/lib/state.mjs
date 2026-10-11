@@ -12,6 +12,13 @@
  * 最坏情况是一次新故障晚一轮开单。
  */
 export const OPEN_AFTER = 2;
+/**
+ * 个别检查项要连续更多次失败才开单（overview#304）：
+ * A2-search-l1 在搜索机夜间任务／公网抖动时常有「连续 2 次、约 5 分钟」的短暂失败（10-02～10-10 开关单 40+ 张，
+ * 平均 5～10 分钟自愈），2 次就开单太吵；改为连续 3 次（循环每 5 分钟一次＝约 15 分钟）才开，真故障最多晚 5 分钟开单。
+ */
+export const OPEN_AFTER_BY_CHECK = { 'A2-search-l1': 3 };
+export const openAfterFor = (id) => OPEN_AFTER_BY_CHECK[id] ?? OPEN_AFTER;
 export const REMIND_MS = 6 * 3600 * 1000;
 
 export function emptyState() {
@@ -86,7 +93,7 @@ export function reconcile(checkState, openIssues, { openAfter = OPEN_AFTER } = {
       s.issue = open; // 手动关掉了（open=null），或被换成另一张单
     } else if (!s.issue && open) {
       s.issue = open;
-      s.fails = Math.max(s.fails, openAfter);
+      s.fails = Math.max(s.fails, openAfterFor(id) > openAfter ? openAfterFor(id) : openAfter);
     }
     out[id] = s;
   }
