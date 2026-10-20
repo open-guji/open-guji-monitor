@@ -21,7 +21,7 @@
 export const TARGET = process.env.TARGET ?? 'https://www.openguji.com';
 
 /** 数据源 COS（经 EdgeOne 反代） */
-export const DATA_BASE = process.env.DATA_BASE ?? 'https://data.kaiyuanguji.com';
+export const DATA_BASE = process.env.DATA_BASE ?? 'https://data.openguji.com';
 
 /** 搜索 L1（Meilisearch，上海）。公开只读 key，非机密。 */
 export const MEILI_BASE = process.env.MEILI_BASE ?? 'https://api.kaiyuanguji.com';
