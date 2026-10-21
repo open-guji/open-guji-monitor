@@ -1,7 +1,7 @@
 /**
  * 正式站（www）与测试站（staging）的 HTTP 采样对比（任务书 §六；CUT2 后两边都是全栈）。每轮 A 探测顺带跑一次：
  *   · 每个目标 × 每类页面（首页／条目页×10 个 id／全文页）记 首字节时间、总耗时、状态、CDN 命中；
- *   · 搜索接口两边前端都直连 api.kaiyuanguji.com，是同一个后端，记在 target=shared 下；
+ *   · 搜索接口两边前端都直连 api.openguji.com，是同一个后端，记在 target=shared 下；
  *   · 不告警的目标（测试站）另跑一遍适用的 A 类检查，结果只进样本。
  * 注意：HTTP 层的数只比「文档本身」，用户真正看到内容的快慢看浏览器指标（LCP），见 browser-vitals.mjs。
  */

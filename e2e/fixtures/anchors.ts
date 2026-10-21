@@ -24,7 +24,7 @@ export const TARGET = process.env.TARGET ?? 'https://www.openguji.com';
 export const DATA_BASE = process.env.DATA_BASE ?? 'https://data.openguji.com';
 
 /** 搜索 L1（Meilisearch，上海）。公开只读 key，非机密。 */
-export const MEILI_BASE = process.env.MEILI_BASE ?? 'https://api.kaiyuanguji.com';
+export const MEILI_BASE = process.env.MEILI_BASE ?? 'https://api.openguji.com';
 export const MEILI_KEY =
     process.env.MEILI_KEY ??
     '1b0b438f7eadd34e1a6b53c76d63bd3614822d3ec9856251c9340a78456c5465';
